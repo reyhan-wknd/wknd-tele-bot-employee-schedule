@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  telegramId   BigInt         @id @map("telegram_id")
+  googleEmail  String         @unique @map("google_email") @db.VarChar(255)
+  googleSub    String         @unique @map("google_sub") @db.VarChar(255)
+  accessToken  String?        @map("access_token") @db.Text
+  refreshToken String?        @map("refresh_token") @db.Text
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Attendance {
+  id         Int       @id @default(autoincrement())
+  telegramId BigInt    @map("telegram_id")
+  date       DateTime  @map("date") @db.Date
+  checkIn    DateTime  @map("check_in")
+  checkOut   DateTime? @map("check_out")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@unique([telegramId, date])
+  @@index([telegramId])
+  @@map("attendances")
+}
+
+model Schedule {
+  id          Int      @id @default(autoincrement())
+  employeeNik String   @map("employee_nik") @db.VarChar(50)
+  jobTitle    String   @map("job_title") @db.VarChar(255)
+  name        String   @map("name") @db.VarChar(255)
+  status      String   @map("status") @db.VarChar(50)
+  projectName String   @map("project_name") @db.VarChar(255)
+  date        DateTime @map("date") @db.Date
+
+  @@index([employeeNik])
+  @@index([date])
+  @@index([name])
+  @@index([employeeNik, date])
+  @@map("schedules")
+}
+
+model UserSchedule {
+  id          Int    @id @default(autoincrement())
+  telegramId  BigInt @unique @map("telegram_id")
+  employeeNik String @map("employee_nik") @db.VarChar(50)
+
+  @@index([employeeNik])
+  @@map("user_schedules")
+}
