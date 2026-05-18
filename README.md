@@ -7,6 +7,8 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - **Backend:** TypeScript, Express, Telegraf, Prisma
 - **Frontend:** Plain HTML + Vanilla JS (Telegram Mini App)
 - **Database:** MySQL
+- **Tunnel:** Cloudflare Tunnel (named tunnel)
+- **Data Source:** Supabase (jadwal WFO)
 
 ## Features
 
@@ -22,62 +24,144 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - Reminder check-in (09:30, 09:50) dan check-out (18:00, 21:00, 23:00)
 
 ### Jadwal WFO
-- `/schedule` — lihat jadwal WFO minggu ini + minggu depan
+- `/schedule` — lihat jadwal WFO minggu ini + minggu depan (Minggu–Sabtu)
 - Auto-pairing user dengan data employee (via nama email atau NIK)
 - Data di-sync dari Supabase setiap hari jam 20:00 WIB
 - Reminder WFO besok (Senin-Kamis jam 21:00)
 - Reminder jadwal minggu depan (Jumat jam 21:00)
+
+### Token Management
+- Cek validitas Google token setiap hari kerja jam 08:00 WIB
+- Auto-refresh jika expired, hapus akun & notify user jika refresh gagal
 
 ## Setup
 
 ### 1. Prerequisites
 
 - Node.js 18+
-- MySQL database
+- Docker (untuk MySQL)
 - Telegram Bot Token (dari @BotFather)
 - Google OAuth2 credentials (dari Google Cloud Console)
+- Cloudflare account dengan domain terdaftar
 
-### 2. Google Cloud Console
+### 2. Database (Docker)
+
+```bash
+docker compose up -d
+```
+
+MySQL akan running di port `3309` dengan credentials:
+- User: `root`
+- Password: `password`
+- Database: `tele_sso`
+
+### 3. Google Cloud Console
 
 1. Buat project baru di [Google Cloud Console](https://console.cloud.google.com)
 2. Enable "Google Identity" API
 3. Buat OAuth 2.0 Client ID (Web application)
 4. Tambahkan Authorized redirect URI: `https://your-domain.com/auth/google/callback`
 5. Tambahkan scope: `openid`, `email`, `profile`, `calendar.events.readonly`
+6. Tambahkan test user di OAuth consent screen (selama app masih "Testing")
 
-### 3. Telegram Bot
+### 4. Telegram Bot
 
 1. Buat bot via @BotFather
-2. Set Web App URL via @BotFather → `/setmenubutton` atau langsung via inline keyboard
+2. Bot akan menampilkan Mini App via inline keyboard saat `/login`
 
-### 4. Environment Variables
+### 5. Cloudflare Tunnel
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create <tunnel-name>
+cloudflared tunnel route dns <tunnel-name> <subdomain.your-domain.com>
+```
+
+Buat config di `~/.cloudflared/config.yml`:
+```yaml
+tunnel: <TUNNEL_ID>
+credentials-file: ~/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: <subdomain.your-domain.com>
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
+Jalankan tunnel:
+```bash
+cloudflared tunnel --config ~/.cloudflared/config.yml run
+```
+
+### 6. Environment Variables
 
 ```bash
 cp backend/.env.example backend/.env
-# Edit backend/.env dengan credentials Anda
 ```
 
-### 5. Install & Run
+Isi variabel berikut:
+| Variable | Keterangan |
+|----------|-----------|
+| `BOT_TOKEN` | Token dari @BotFather |
+| `BOT_MODE` | `polling` (dev) atau `webhook` (prod) |
+| `WEBHOOK_DOMAIN` | Domain HTTPS (untuk mode webhook) |
+| `GOOGLE_CLIENT_ID` | Dari Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | Dari Google Cloud Console |
+| `GOOGLE_REDIRECT_URI` | `https://<domain>/auth/google/callback` |
+| `DATABASE_URL` | `mysql://root:password@localhost:3309/tele_sso` |
+| `PORT` | Port backend (default: 3000) |
+| `JWT_SECRET` | Secret untuk sign state token |
+| `FRONTEND_URL` | URL HTTPS domain (sama dengan tunnel) |
+| `SUPABASE_KEY` | Supabase anon key untuk fetch jadwal |
+
+### 7. Install & Run
 
 ```bash
 cd backend
 npm install
+npx prisma generate
 npx prisma migrate dev
+```
+
+Development (foreground, auto-reload):
+```bash
 npm run dev
 ```
 
-### 6. Frontend
+Background (tanpa watch):
+```bash
+nohup npx tsx src/index.ts > nohup.out 2>&1 &
+```
 
-Host folder `frontend/` di static file server atau biarkan backend serve static files.
+### 8. Frontend
 
-Ganti `BACKEND_URL` di `frontend/index.html` dengan URL backend/tunnel Anda.
+Backend sudah serve folder `frontend/` sebagai static files. Pastikan `BACKEND_URL` di `frontend/index.html` sesuai dengan domain tunnel.
 
-### 7. Cron Jobs
+### 9. Cron Jobs
 
 ```bash
 crontab -e
 # Paste isi dari backend/crontab.txt
 ```
+
+Pastikan folder `backend/logs/` sudah dibuat:
+```bash
+mkdir -p backend/logs
+```
+
+#### Daftar Cron Jobs
+
+| Waktu (WIB) | Hari | Fungsi |
+|---|---|---|
+| 08:00 | Senin-Jumat | Cek validitas Google token |
+| 09:30 | Senin-Jumat | Reminder check-in (1) |
+| 09:50 | Senin-Jumat | Reminder check-in (2) |
+| 18:00 | Senin-Jumat | Reminder check-out (1) |
+| 20:00 | Setiap hari | Sync jadwal dari Supabase |
+| 21:00 | Senin-Jumat | Reminder check-out (2) |
+| 21:00 | Senin-Kamis | Reminder WFO besok |
+| 21:00 | Jumat | Reminder jadwal WFO minggu depan |
+| 23:00 | Senin-Jumat | Reminder check-out (3) |
 
 ## Bot Modes
 
@@ -94,11 +178,43 @@ crontab -e
 5. User login Google, consent
 6. Google redirect ke backend callback
 7. Backend simpan mapping telegram_id ↔ google_email
-8. Bot kirim pesan konfirmasi, Mini App auto-close
+8. Bot kirim pesan konfirmasi + auto-trigger schedule pairing
+9. Mini App auto-close
 
 ### Schedule Pairing
-1. User kirim `/schedule`
-2. Sistem baca nama dari email, cari di table schedules
-3. Jika ditemukan → konfirmasi via button
-4. Jika tidak → fallback cari via NIK
-5. Setelah paired, tampilkan jadwal WFO
+1. Sistem baca nama dari email, cari di table schedules
+2. Jika ditemukan 1 → konfirmasi via button
+3. Jika ditemukan > 1 → pilih via button
+4. Jika tidak ditemukan → fallback cari via NIK
+5. Setelah paired, otomatis tampilkan jadwal WFO
+
+## Project Structure
+
+```
+├── README.md
+├── docker-compose.yml
+├── package.json
+├── backend/
+│   ├── .env.example
+│   ├── crontab.txt
+│   ├── prisma/
+│   │   └── schema.prisma
+│   └── src/
+│       ├── index.ts              # Express server entry
+│       ├── bot.ts                # Telegraf bot + commands
+│       ├── db.ts                 # Prisma client
+│       ├── routes/
+│       │   └── auth.ts           # OAuth endpoints
+│       ├── services/
+│       │   ├── calendar.ts       # Google Calendar cuti detection
+│       │   ├── schedule.ts       # Schedule pairing logic
+│       │   └── supabase.ts       # Supabase data fetch
+│       └── cron/
+│           ├── check-tokens.ts   # Token validity check
+│           ├── reminder.ts       # Attendance reminders
+│           ├── reminder-wfo.ts   # WFO reminders
+│           └── sync-schedules.ts # Supabase → MySQL sync
+└── frontend/
+    ├── index.html                # Mini App (OAuth trigger)
+    └── success.html              # Post-login success page
+```
