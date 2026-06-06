@@ -15,7 +15,7 @@ function todayDateWIB(): Date {
   return new Date(dateStr);
 }
 
-async function sendCheckInReminders() {
+export async function sendCheckInReminders() {
   const now = nowWIB();
   const day = now.getDay();
   if (day === 0 || day === 6) return; // Skip weekends
@@ -42,7 +42,7 @@ async function sendCheckInReminders() {
   }
 }
 
-async function sendCheckOutReminders() {
+export async function sendCheckOutReminders() {
   const now = nowWIB();
   const day = now.getDay();
   if (day === 0 || day === 6) return;
@@ -66,23 +66,3 @@ async function sendCheckOutReminders() {
     ).catch((err) => console.error(`Failed to send check-out reminder to ${att.telegramId}:`, err.message));
   }
 }
-
-async function main() {
-  const type = process.argv[2]; // 'checkin' or 'checkout'
-
-  if (type === 'checkin') {
-    await sendCheckInReminders();
-  } else if (type === 'checkout') {
-    await sendCheckOutReminders();
-  } else {
-    console.error('Usage: tsx src/cron/reminder.ts <checkin|checkout>');
-    process.exit(1);
-  }
-
-  await prisma.$disconnect();
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

@@ -8,7 +8,7 @@ function formatDate(date: Date): string {
   return date.toLocaleDateString('id-ID', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-async function remindTomorrow() {
+export async function remindTomorrow() {
   // Get tomorrow's date in WIB
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
   const tomorrow = new Date(now);
@@ -33,7 +33,7 @@ async function remindTomorrow() {
   }
 }
 
-async function remindNextWeek() {
+export async function remindNextWeek() {
   // Get next Monday to Friday
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
   const day = now.getDay(); // Friday = 5
@@ -69,23 +69,3 @@ async function remindNextWeek() {
     }
   }
 }
-
-async function main() {
-  const type = process.argv[2]; // 'tomorrow' or 'weekly'
-
-  if (type === 'tomorrow') {
-    await remindTomorrow();
-  } else if (type === 'weekly') {
-    await remindNextWeek();
-  } else {
-    console.error('Usage: tsx src/cron/reminder-wfo.ts <tomorrow|weekly>');
-    process.exit(1);
-  }
-
-  await prisma.$disconnect();
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

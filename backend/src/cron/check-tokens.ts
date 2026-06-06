@@ -4,7 +4,9 @@ import { prisma } from '../db';
 
 const bot = new Telegraf(process.env.BOT_TOKEN!);
 
-async function checkTokens() {
+export async function checkTokens() {
+  console.log(`[${new Date().toISOString()}] Checking tokens...`);
+
   const users = await prisma.user.findMany({
     where: { accessToken: { not: null } },
   });
@@ -44,16 +46,6 @@ async function checkTokens() {
       console.error(`Token check failed for ${user.telegramId}:`, err);
     }
   }
-}
 
-async function main() {
-  console.log(`[${new Date().toISOString()}] Checking tokens...`);
-  await checkTokens();
   console.log(`[${new Date().toISOString()}] Token check complete.`);
-  await prisma.$disconnect();
 }
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
