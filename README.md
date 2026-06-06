@@ -128,9 +128,9 @@ Development (foreground, auto-reload):
 npm run dev
 ```
 
-Background (tanpa watch):
+Background (dikelola systemd, auto-restart):
 ```bash
-nohup npx tsx src/index.ts > nohup.out 2>&1 &
+systemctl --user start wknd-tele-bot
 ```
 
 ### 8. Frontend
@@ -139,17 +139,7 @@ Backend sudah serve folder `frontend/` sebagai static files. Pastikan `BACKEND_U
 
 ### 9. Cron Jobs
 
-```bash
-crontab -e
-# Paste isi dari backend/crontab.txt
-```
-
-Pastikan folder `backend/logs/` sudah dibuat:
-```bash
-mkdir -p backend/logs
-```
-
-#### Daftar Cron Jobs
+Semua cron job berjalan **otomatis di dalam proses backend** via `node-cron` (dikelola `backend/src/scheduler.ts`). Tidak perlu setup crontab manual.
 
 | Waktu (WIB) | Hari | Fungsi |
 |---|---|---|
@@ -196,12 +186,12 @@ mkdir -p backend/logs
 ├── package.json
 ├── backend/
 │   ├── .env.example
-│   ├── crontab.txt
 │   ├── prisma/
 │   │   └── schema.prisma
 │   └── src/
 │       ├── index.ts              # Express server entry
 │       ├── bot.ts                # Telegraf bot + commands
+│       ├── scheduler.ts          # node-cron job registration
 │       ├── db.ts                 # Prisma client
 │       ├── routes/
 │       │   └── auth.ts           # OAuth endpoints
