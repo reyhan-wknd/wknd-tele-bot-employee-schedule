@@ -407,8 +407,20 @@ bot.command('logout', async (ctx) => {
   ctx.reply(`🔓 Akun Google (${user.googleEmail}) berhasil di-unlink.`);
 });
 
+const BOT_COMMANDS = [
+  { command: 'start', description: 'Lihat daftar perintah' },
+  { command: 'login', description: 'Hubungkan akun Google' },
+  { command: 'logout', description: 'Hapus koneksi akun Google' },
+  { command: 'status', description: 'Cek status verifikasi & absensi hari ini' },
+  { command: 'schedule', description: 'Lihat jadwal WFO minggu ini & minggu depan' },
+  { command: 'check_in', description: 'Absen masuk (min. 08:00 WIB)' },
+  { command: 'check_out', description: 'Absen pulang (min. 18:00 WIB)' },
+];
+
 export function launchBot(app?: Express) {
   const mode = process.env.BOT_MODE || 'polling';
+
+  bot.telegram.setMyCommands(BOT_COMMANDS);
 
   if (mode === 'webhook') {
     const webhookPath = `/webhook/${BOT_TOKEN}`;
