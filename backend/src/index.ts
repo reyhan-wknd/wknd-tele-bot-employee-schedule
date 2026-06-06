@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { launchBot } from './bot';
+import { startScheduler } from './scheduler';
 import { authRouter } from './routes/auth';
 
 const app = express();
@@ -25,4 +26,5 @@ app.use(express.static(path.join(__dirname, '../../frontend')));
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   launchBot(app);
+  startScheduler();
 });
