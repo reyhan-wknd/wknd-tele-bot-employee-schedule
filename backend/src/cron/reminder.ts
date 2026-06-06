@@ -11,7 +11,8 @@ function nowWIB(): Date {
 
 function todayDateWIB(): Date {
   const now = nowWIB();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T00:00:00.000Z`;
+  return new Date(dateStr);
 }
 
 async function sendCheckInReminders() {
