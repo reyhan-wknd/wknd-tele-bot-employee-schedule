@@ -60,9 +60,15 @@ export async function remindNextWeek() {
     });
 
     if (schedules.length > 0) {
-      let msg = '📅 Jadwal WFO kamu minggu depan:\n\n';
+      const grouped = new Map<string, string[]>();
       for (const s of schedules) {
-        msg += `  • ${formatDate(s.date)} — ${s.projectName}\n`;
+        const label = formatDate(s.date);
+        grouped.set(label, [...(grouped.get(label) ?? []), s.projectName]);
+      }
+
+      let msg = '📅 Jadwal WFO kamu minggu depan:\n\n';
+      for (const [label, projects] of grouped) {
+        msg += `  • ${label} — ${projects.join(', ')}\n`;
       }
       await bot.telegram.sendMessage(Number(us.telegramId), msg)
         .catch((err) => console.error(`Failed to send weekly reminder to ${us.telegramId}:`, err.message));
