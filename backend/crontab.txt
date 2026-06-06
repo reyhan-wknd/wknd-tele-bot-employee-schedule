@@ -1,29 +1,7 @@
-# Attendance Reminder Crontab (WIB, sistem timezone Asia/Jakarta)
-# Install: crontab -e lalu paste baris di bawah
-
-PROJECT=/home/wknd/github/wknd-tele-bot-employee-schedule/backend
-LOG=/home/wknd/github/wknd-tele-bot-employee-schedule/backend/logs
-
-# Sync schedules from Supabase (WIB 20:00)
-0 20 * * * cd $PROJECT && npx tsx src/cron/sync-schedules.ts >> $LOG/sync-schedules.log 2>&1
-
-# Token validity check (WIB 08:00, Mon-Fri)
-0 8 * * 1-5 cd $PROJECT && npx tsx src/cron/check-tokens.ts >> $LOG/check-tokens.log 2>&1
-
-# Check-in reminders (WIB 09:30 dan WIB 09:50, Mon-Fri)
-30 9 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
-50 9 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
-
-# Check-out reminders (WIB 18:00, WIB 21:00, WIB 23:00, Mon-Fri)
-0 18 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
-0 21 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
-0 23 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
-
-# WFO Reminder - tomorrow (WIB 21:00, Mon-Thu only)
-0 21 * * 1-4 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts tomorrow >> $LOG/reminder-wfo.log 2>&1
-
-# WFO Reminder - next week (WIB 21:00, Friday only)
-0 21 * * 5 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts weekly >> $LOG/reminder-wfo.log 2>&1
-
-# Auto-start app on reboot
-@reboot /home/wknd/github/wknd-tele-bot-employee-schedule/manage.sh start >> /home/wknd/github/wknd-tele-bot-employee-schedule/backend/logs/manage.log 2>&1
+# Semua cron job dikelola oleh node-cron di dalam proses backend (src/scheduler.ts).
+# Backend dan cloudflared tunnel dikelola sebagai systemd user services:
+#
+#   ~/.config/systemd/user/wknd-tele-bot.service
+#   ~/.config/systemd/user/cloudflared-wknd.service
+#
+# Tidak ada crontab yang perlu dipasang.
