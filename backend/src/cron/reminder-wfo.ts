@@ -20,14 +20,16 @@ export async function remindTomorrow() {
   const userSchedules = await prisma.userSchedule.findMany();
 
   for (const us of userSchedules) {
-    const schedule = await prisma.schedule.findFirst({
+    const schedules = await prisma.schedule.findMany({
       where: { employeeNik: us.employeeNik, date: tomorrowDate },
     });
 
-    if (schedule) {
+    if (schedules.length > 0) {
+      const projects = schedules.map((s) => s.projectName).join(', ');
       await bot.telegram.sendMessage(
         Number(us.telegramId),
-        `📢 Reminder: Besok (${formatDate(tomorrowDate)}) adalah jadwal WFO kamu.\n\n📁 Project: ${schedule.projectName}`
+        `📢 Reminder: Besok (*${formatDate(tomorrowDate)}*) adalah jadwal WFO kamu.\n\n📁 Project: ${projects}`,
+        { parse_mode: 'Markdown' }
       ).catch((err) => console.error(`Failed to send WFO reminder to ${us.telegramId}:`, err.message));
     }
   }
@@ -68,9 +70,9 @@ export async function remindNextWeek() {
 
       let msg = '📅 Jadwal WFO kamu minggu depan:\n\n';
       for (const [label, projects] of grouped) {
-        msg += `  • ${label} — ${projects.join(', ')}\n`;
+        msg += `  • *${label}* — ${projects.join(', ')}\n`;
       }
-      await bot.telegram.sendMessage(Number(us.telegramId), msg)
+      await bot.telegram.sendMessage(Number(us.telegramId), msg, { parse_mode: 'Markdown' })
         .catch((err) => console.error(`Failed to send weekly reminder to ${us.telegramId}:`, err.message));
     }
   }
