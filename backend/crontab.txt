@@ -1,28 +1,29 @@
-# Attendance Reminder Crontab (WIB = UTC+7)
+# Attendance Reminder Crontab (WIB, sistem timezone Asia/Jakarta)
 # Install: crontab -e lalu paste baris di bawah
-# Sesuaikan path /home/reyhanr/wknd/projects/wknd-tele-bot-employee-schedule/backend
 
-PROJECT=/home/reyhanr/wknd/projects/wknd-tele-bot-employee-schedule/backend
-LOG=$PROJECT/logs
+PROJECT=/home/wknd/github/wknd-tele-bot-employee-schedule/backend
+LOG=/home/wknd/github/wknd-tele-bot-employee-schedule/backend/logs
 
-# Sync schedules from Supabase (WIB 20:00 = UTC 13:00)
-0 13 * * * cd $PROJECT && npx tsx src/cron/sync-schedules.ts >> $LOG/sync-schedules.log 2>&1
+# Sync schedules from Supabase (WIB 20:00)
+0 20 * * * cd $PROJECT && npx tsx src/cron/sync-schedules.ts >> $LOG/sync-schedules.log 2>&1
 
-# Token validity check (WIB 08:00 = UTC 01:00, Mon-Fri)
-0 1 * * 1-5 cd $PROJECT && npx tsx src/cron/check-tokens.ts >> $LOG/check-tokens.log 2>&1
+# Token validity check (WIB 08:00, Mon-Fri)
+0 8 * * 1-5 cd $PROJECT && npx tsx src/cron/check-tokens.ts >> $LOG/check-tokens.log 2>&1
 
-# Check-in reminders (WIB 09:30 = UTC 02:30, WIB 09:50 = UTC 02:50)
-30 2 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
-50 2 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
+# Check-in reminders (WIB 09:30 dan WIB 09:50, Mon-Fri)
+30 9 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
+50 9 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
 
-# Check-out reminders (WIB 18:00 = UTC 11:00, WIB 21:00 = UTC 14:00, WIB 23:00 = UTC 16:00)
-0 11 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
-0 14 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
-0 16 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
+# Check-out reminders (WIB 18:00, WIB 21:00, WIB 23:00, Mon-Fri)
+0 18 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
+0 21 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
+0 23 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
 
-# WFO Reminder - tomorrow (WIB 21:00 = UTC 14:00, Mon-Thu only)
-0 14 * * 1-4 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts tomorrow >> $LOG/reminder-wfo.log 2>&1
+# WFO Reminder - tomorrow (WIB 21:00, Mon-Thu only)
+0 21 * * 1-4 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts tomorrow >> $LOG/reminder-wfo.log 2>&1
 
-# WFO Reminder - next week (WIB 21:00 = UTC 14:00, Friday only)
-0 14 * * 5 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts weekly >> $LOG/reminder-wfo.log 2>&1
+# WFO Reminder - next week (WIB 21:00, Friday only)
+0 21 * * 5 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts weekly >> $LOG/reminder-wfo.log 2>&1
 
+# Auto-start app on reboot
+@reboot /home/wknd/github/wknd-tele-bot-employee-schedule/manage.sh start >> /home/wknd/github/wknd-tele-bot-employee-schedule/backend/logs/manage.log 2>&1
