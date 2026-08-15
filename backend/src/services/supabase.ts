@@ -1,3 +1,5 @@
+import { addDays, isoDateOf, todayWIB, weekdayOf } from '../lib/time';
+
 const SUPABASE_URL = 'https://ngnhaftmcaoqmdgifsbv.supabase.co/rest/v1';
 const SUPABASE_KEY = process.env.SUPABASE_KEY!;
 
@@ -14,6 +16,12 @@ interface SupabaseScheduleResponse {
   employees: { name: string };
 }
 
+export interface EmployeeRecord {
+  employeeNik: string;
+  name: string;
+  jobTitle: string;
+}
+
 export interface ScheduleRecord {
   employeeNik: string;
   jobTitle: string;
@@ -24,18 +32,12 @@ export interface ScheduleRecord {
 }
 
 function getDateRange(): { start: string; end: string } {
-  // Sunday of current week to Saturday of next week (WIB)
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
-  const day = now.getDay(); // 0=Sun, 6=Sat
+  // Minggu di pekan berjalan sampai Sabtu pekan depan, dihitung dalam WIB
+  const today = todayWIB();
+  const sunday = addDays(today, -weekdayOf(today));
+  const nextSaturday = addDays(sunday, 13);
 
-  const sunday = new Date(now);
-  sunday.setDate(now.getDate() - day);
-
-  const nextSaturday = new Date(sunday);
-  nextSaturday.setDate(sunday.getDate() + 13); // Sunday + 13 = Saturday next week
-
-  const fmt = (d: Date) => d.toISOString().split('T')[0];
-  return { start: fmt(sunday), end: fmt(nextSaturday) };
+  return { start: isoDateOf(sunday), end: isoDateOf(nextSaturday) };
 }
 
 const headers = {
@@ -68,6 +70,31 @@ async function fetchSchedules(start: string, end: string): Promise<SupabaseSched
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Supabase schedules fetch failed: ${res.status}`);
   return res.json() as Promise<SupabaseScheduleResponse[]>;
+}
+
+/**
+ * Cari karyawan berdasarkan email yang sudah diverifikasi Google.
+ *
+ * Sengaja menembak tabel `employees` di Supabase, bukan salinan jadwal di MySQL:
+ * salinan itu hanya memuat karyawan yang punya jadwal dua minggu ini, sedangkan
+ * `employees` memuat semuanya. Semua email di sana tersimpan huruf kecil, jadi
+ * input cukup di-lowercase lalu dicocokkan persis.
+ */
+export async function findEmployeeByEmail(email: string): Promise<EmployeeRecord | null> {
+  const params = new URLSearchParams({
+    select: 'nik,name,job_title',
+    email: `eq.${email.trim().toLowerCase()}`,
+    limit: '1',
+  });
+
+  const res = await fetch(`${SUPABASE_URL}/employees?${params.toString()}`, { headers });
+  if (!res.ok) throw new Error(`Supabase employee lookup failed: ${res.status}`);
+
+  const rows = (await res.json()) as { nik: string; name: string; job_title: string }[];
+  const employee = rows[0];
+  if (!employee) return null;
+
+  return { employeeNik: employee.nik, name: employee.name, jobTitle: employee.job_title };
 }
 
 export async function fetchAllSchedules(): Promise<ScheduleRecord[]> {

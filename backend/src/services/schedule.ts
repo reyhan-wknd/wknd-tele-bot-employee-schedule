@@ -1,22 +1,5 @@
 import { prisma } from '../db';
-
-export async function findEmployeesByName(name: string): Promise<{ employeeNik: string; name: string; jobTitle: string }[]> {
-  // Search by partial name match (case-insensitive)
-  const results = await prisma.schedule.findMany({
-    where: { name: { contains: name } },
-    select: { employeeNik: true, name: true, jobTitle: true },
-    distinct: ['employeeNik'],
-  });
-  return results;
-}
-
-export async function findEmployeeByNik(nik: string): Promise<{ employeeNik: string; name: string; jobTitle: string } | null> {
-  const result = await prisma.schedule.findFirst({
-    where: { employeeNik: nik },
-    select: { employeeNik: true, name: true, jobTitle: true },
-  });
-  return result;
-}
+import { findEmployeeByEmail, type EmployeeRecord } from './supabase';
 
 export async function pairUserSchedule(telegramId: bigint, employeeNik: string): Promise<void> {
   await prisma.userSchedule.upsert({
@@ -30,11 +13,18 @@ export async function getUserPairing(telegramId: bigint) {
   return prisma.userSchedule.findUnique({ where: { telegramId } });
 }
 
-export function extractNameFromEmail(email: string): string {
-  // email format: firstname.lastname@domain.com or firstname@domain.com
-  const local = email.split('@')[0];
-  // Replace dots/underscores with spaces, capitalize
-  return local
-    .replace(/[._]/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+/**
+ * Tautkan user ke data karyawan lewat email yang sudah diverifikasi Google.
+ *
+ * Identitasnya ditentukan sepenuhnya oleh email di ID token — user tidak pernah
+ * ikut memilih, sehingga tidak ada NIK yang bisa dipaksakan dari sisi klien.
+ * NIK hasil pencarian disimpan supaya query jadwal dan reminder berikutnya
+ * tidak lagi bergantung pada Supabase.
+ */
+export async function pairUserByEmail(telegramId: bigint, email: string): Promise<EmployeeRecord | null> {
+  const employee = await findEmployeeByEmail(email);
+  if (!employee) return null;
+
+  await pairUserSchedule(telegramId, employee.employeeNik);
+  return employee;
 }

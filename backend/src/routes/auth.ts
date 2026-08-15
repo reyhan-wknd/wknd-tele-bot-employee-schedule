@@ -5,7 +5,8 @@ import { OAuth2Client } from 'google-auth-library';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../db';
 import { bot } from '../bot';
-import { findEmployeesByName, extractNameFromEmail } from '../services/schedule';
+import { ALLOWED_EMAIL_DOMAINS, isAllowedEmail } from '../config';
+import { pairUserByEmail } from '../services/schedule';
 
 export const authRouter = Router();
 
@@ -89,6 +90,12 @@ authRouter.post('/init', (req: Request, res: Response) => {
   googleAuthUrl.searchParams.set('prompt', 'consent');
   googleAuthUrl.searchParams.set('state', state);
 
+  // Filter pemilih akun Google. Google hanya menerima satu nilai, dan parameter ini
+  // bisa diabaikan klien — gerbang sebenarnya ada di callback.
+  if (ALLOWED_EMAIL_DOMAINS.length === 1) {
+    googleAuthUrl.searchParams.set('hd', ALLOWED_EMAIL_DOMAINS[0]);
+  }
+
   res.json({ url: googleAuthUrl.toString() });
 });
 
@@ -133,6 +140,20 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
       return;
     }
 
+    // Hanya akun perusahaan yang boleh ditautkan. Sumber kebenarannya adalah email di
+    // ID token yang tanda tangannya sudah diverifikasi, bukan parameter `hd` di URL.
+    // Gerbang ini berjalan sebelum upsert supaya token akun luar tidak pernah tersimpan.
+    if (!payload.email || !isAllowedEmail(payload.email)) {
+      await bot.telegram
+        .sendMessage(
+          telegramId,
+          `❌ Verifikasi gagal. Gunakan akun Google perusahaan (@${ALLOWED_EMAIL_DOMAINS.join(', @')}).`
+        )
+        .catch((err) => console.error('Gagal mengirim notifikasi penolakan domain:', err));
+      res.redirect(`${FRONTEND_URL}/index.html?error=domain`);
+      return;
+    }
+
     await prisma.user.upsert({
       where: { telegramId: BigInt(telegramId) },
       update: {
@@ -155,36 +176,27 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
       `✅ Verifikasi Berhasil!\n\nHalo, ${payload.email}`
     );
 
-    // Auto-trigger schedule pairing flow
-    const nameFromEmail = extractNameFromEmail(payload.email!);
-    const matches = await findEmployeesByName(nameFromEmail);
+    // Tautkan ke data karyawan lewat email yang barusan diverifikasi. Kegagalan di sini
+    // tidak boleh menggagalkan login — user tinggal mengulang lewat /schedule.
+    try {
+      const employee = await pairUserByEmail(BigInt(telegramId), payload.email);
 
-    if (matches.length === 1) {
-      await bot.telegram.sendMessage(telegramId, `Apakah ini kamu?\n\n👤 ${matches[0].name}\n💼 ${matches[0].jobTitle}\n🆔 ${matches[0].employeeNik}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '✅ Ya, itu saya', callback_data: `pair:${matches[0].employeeNik}` }],
-            [{ text: '❌ Bukan saya', callback_data: 'pair:not_me' }],
-          ],
-        },
-      });
-    } else if (matches.length > 1) {
-      const buttons = matches.map((m) => [
-        { text: `${m.name} (${m.jobTitle})`, callback_data: `pair:${m.employeeNik}` },
-      ]);
-      buttons.push([{ text: '❌ Tidak ada yang cocok', callback_data: 'pair:not_me' }]);
-      await bot.telegram.sendMessage(telegramId, `Ditemukan ${matches.length} nama yang mirip. Pilih yang sesuai:`, {
-        reply_markup: { inline_keyboard: buttons },
-      });
-    } else {
-      await bot.telegram.sendMessage(telegramId, `❌ Nama "${nameFromEmail}" tidak ditemukan di jadwal.\n\nApakah kamu ingin mencari berdasarkan NIK?`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔍 Cari via NIK', callback_data: 'pair:ask_nik' }],
-            [{ text: '❌ Tidak', callback_data: 'pair:disable' }],
-          ],
-        },
-      });
+      if (employee) {
+        await bot.telegram.sendMessage(
+          telegramId,
+          `📇 Terhubung dengan data karyawan:\n\n👤 ${employee.name}\n💼 ${employee.jobTitle}\n🆔 ${employee.employeeNik}\n\nKirim /schedule untuk melihat jadwal WFO kamu.`
+        );
+      } else {
+        await bot.telegram.sendMessage(
+          telegramId,
+          `⚠️ Akun kamu sudah terverifikasi, tapi data karyawan dengan email ${payload.email} belum ditemukan.\n\nHubungi admin untuk melengkapi data kamu, lalu kirim /schedule lagi.`
+        );
+      }
+    } catch (err) {
+      console.error('Pairing karyawan gagal:', err);
+      await bot.telegram
+        .sendMessage(telegramId, '⚠️ Data jadwal sedang tidak bisa diakses. Kirim /schedule beberapa saat lagi.')
+        .catch((sendErr) => console.error('Gagal mengirim notifikasi pairing:', sendErr));
     }
 
     res.redirect(`${FRONTEND_URL}/success.html`);
