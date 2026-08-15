@@ -6,11 +6,25 @@ import { formatProjects, groupSchedulesByDate } from '../lib/schedule';
 
 const bot = createBot(process.env.BOT_TOKEN!);
 
+/**
+ * Pairing milik user yang sudah logout tidak boleh ikut dikirimi reminder. Sejak
+ * `unlinkUser` dipakai, baris yatim tidak lagi tercipta — filter ini menutup sisa
+ * baris lama yang terlanjur ada.
+ */
+async function pairingUserAktif() {
+  const [userSchedules, users] = await Promise.all([
+    prisma.userSchedule.findMany(),
+    prisma.user.findMany({ select: { telegramId: true } }),
+  ]);
+
+  const aktif = new Set(users.map((u) => u.telegramId.toString()));
+  return userSchedules.filter((us) => aktif.has(us.telegramId.toString()));
+}
+
 async function remindTomorrow() {
   const tomorrowDate = addDays(todayWIB(), 1);
 
-  // Find all user_schedules paired users who have WFO tomorrow
-  const userSchedules = await prisma.userSchedule.findMany();
+  const userSchedules = await pairingUserAktif();
 
   for (const us of userSchedules) {
     // findMany, bukan findFirst: satu hari bisa memuat lebih dari satu proyek.
@@ -36,7 +50,7 @@ async function remindNextWeek() {
   const nextMonday = addDays(today, weekday === 0 ? 1 : 8 - weekday);
   const nextFriday = addDays(nextMonday, 4);
 
-  const userSchedules = await prisma.userSchedule.findMany();
+  const userSchedules = await pairingUserAktif();
 
   for (const us of userSchedules) {
     const schedules = await prisma.schedule.findMany({

@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { prisma } from '../db';
 import { fetchAllSchedules } from '../services/supabase';
+import { assertSyncSane } from '../lib/sync-guard';
 
 async function syncSchedules() {
   const startTime = new Date().toISOString();
@@ -8,7 +9,10 @@ async function syncSchedules() {
 
   try {
     const records = await fetchAllSchedules();
-    console.log(`[${new Date().toISOString()}] Fetched ${records.length} records from Supabase`);
+    const existing = await prisma.schedule.count();
+    console.log(`[${new Date().toISOString()}] Fetched ${records.length} records from Supabase (database: ${existing})`);
+
+    assertSyncSane(records.length, existing);
 
     // Truncate + insert in transaction
     await prisma.$transaction([

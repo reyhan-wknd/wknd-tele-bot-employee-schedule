@@ -42,6 +42,9 @@ function validateInitData(initData: string): { valid: boolean; user?: { id: numb
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
   const computedHash = crypto.createHmac('sha256', secretKey).update(entries).digest('hex');
 
+  // timingSafeEqual melempar RangeError bila panjangnya berbeda, dan `hash` datang dari
+  // input — tanpa cek ini, initData cacat menghasilkan 500, bukan 401.
+  if (computedHash.length !== hash.length) return { valid: false };
   if (!crypto.timingSafeEqual(Buffer.from(computedHash), Buffer.from(hash))) {
     return { valid: false };
   }

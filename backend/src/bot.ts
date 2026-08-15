@@ -2,6 +2,7 @@ import type { Express } from 'express';
 import { prisma } from './db';
 import { isUserOnLeave } from './services/calendar';
 import { getUserPairing, pairUserByEmail } from './services/schedule';
+import { unlinkUser } from './services/user';
 import {
   addDays,
   formatDateOnly,
@@ -310,7 +311,7 @@ bot.command('logout', async (ctx) => {
     return;
   }
 
-  await prisma.user.delete({ where: { telegramId } });
+  await unlinkUser(telegramId);
   await reply(ctx, `🔓 Akun Google (${user.googleEmail}) berhasil di-unlink.`);
 });
 

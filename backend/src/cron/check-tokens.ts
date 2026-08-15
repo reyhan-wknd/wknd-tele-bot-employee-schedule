@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { prisma } from '../db';
 import { createBot } from '../lib/telegram';
+import { unlinkUser } from '../services/user';
 
 const bot = createBot(process.env.BOT_TOKEN!);
 
@@ -32,11 +33,20 @@ async function checkTokens() {
             data: { accessToken: data.access_token },
           });
         } else {
-          // Refresh failed — delete user and notify
-          await prisma.user.delete({ where: { telegramId: user.telegramId } });
+          // Hanya invalid_grant yang berarti izinnya benar-benar dicabut. 429, 5xx, atau
+          // gangguan jaringan tidak boleh menghapus akun beserta pairing-nya.
+          const body = (await refreshRes.json().catch(() => ({}))) as { error?: string };
+          if (body.error !== 'invalid_grant') {
+            console.error(
+              `Refresh token ${user.telegramId} gagal sementara (HTTP ${refreshRes.status}, ${body.error ?? 'tanpa kode'}), akun dipertahankan`
+            );
+            continue;
+          }
+
+          await unlinkUser(user.telegramId);
           await bot.telegram.sendMessage(
             Number(user.telegramId),
-            '⚠️ Akses Google kamu sudah expired. Silakan /login ulang.'
+            '⚠️ Akses Google kamu sudah dicabut. Silakan /login ulang.'
           ).catch((err) => console.error(`Failed to notify ${user.telegramId}:`, err.message));
         }
       }

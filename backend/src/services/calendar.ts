@@ -6,7 +6,22 @@ import { wibDayBounds } from '../lib/time';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
 
-const CUTI_KEYWORDS = ['cuti', 'leave', 'off', 'day off', 'day-off'];
+/**
+ * Dicocokkan dengan batas kata, bukan substring. Kata `off` sendirian sengaja tidak ada:
+ * dulu ia membuat "Ke office pagi", "Coffee chat", dan "Kickoff project" terbaca sebagai cuti.
+ */
+const LEAVE_TITLE_PATTERN = /\b(cuti|izin|leave|day[\s-]?off|off[\s-]?day|pto|ooo)\b/i;
+
+export interface CalendarEventLike {
+  eventType?: string | null;
+  summary?: string | null;
+}
+
+/** Event dianggap cuti bila tipenya outOfOffice, atau judulnya menyebut cuti secara utuh. */
+export function isLeaveEvent(event: CalendarEventLike): boolean {
+  if (event.eventType === 'outOfOffice') return true;
+  return LEAVE_TITLE_PATTERN.test(event.summary ?? '');
+}
 
 function createOAuth2Client(accessToken: string, refreshToken: string | null): OAuth2Client {
   const client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
@@ -48,16 +63,7 @@ export async function isUserOnLeave(telegramId: bigint, instant: Date = new Date
       singleEvents: true,
     });
 
-    const events = res.data.items || [];
-
-    return events.some((event) => {
-      // Check event type outOfOffice
-      if (event.eventType === 'outOfOffice') return true;
-
-      // Check keywords in title
-      const title = (event.summary || '').toLowerCase();
-      return CUTI_KEYWORDS.some((kw) => title.includes(kw));
-    });
+    return (res.data.items ?? []).some(isLeaveEvent);
   } catch (err) {
     console.error('Google Calendar error:', err);
     return false;
