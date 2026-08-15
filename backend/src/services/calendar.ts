@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '../db';
+import { wibDayBounds } from '../lib/time';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
@@ -16,34 +17,34 @@ function createOAuth2Client(accessToken: string, refreshToken: string | null): O
   return client;
 }
 
-export async function isUserOnLeave(telegramId: bigint, date: Date): Promise<boolean> {
+export async function isUserOnLeave(telegramId: bigint, instant: Date = new Date()): Promise<boolean> {
   const user = await prisma.user.findUnique({ where: { telegramId } });
   if (!user || !user.accessToken) return false;
 
   const client = createOAuth2Client(user.accessToken, user.refreshToken);
 
   // Refresh token if needed
-  client.on('tokens', async (tokens) => {
-    if (tokens.access_token) {
-      await prisma.user.update({
-        where: { telegramId },
-        data: { accessToken: tokens.access_token },
-      });
-    }
+  // Listener event tidak punya pemanggil yang menunggu, jadi errornya harus ditangkap
+  // di sini — kalau tidak, kegagalan tulis ke DB menjadi unhandled rejection.
+  client.on('tokens', (tokens) => {
+    if (!tokens.access_token) return;
+
+    prisma.user
+      .update({ where: { telegramId }, data: { accessToken: tokens.access_token } })
+      .catch((err) => console.error(`Gagal menyimpan access token baru untuk ${telegramId}:`, err));
   });
 
   const calendar = google.calendar({ version: 'v3', auth: client });
 
-  const startOfDay = new Date(date);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(date);
-  endOfDay.setHours(23, 59, 59, 999);
+  // Batas hari dihitung dalam WIB, bukan zona waktu mesin — kalau tidak, jendelanya
+  // bergeser dan cuti besok ikut terbaca sebagai cuti hari ini.
+  const { start, end } = wibDayBounds(instant);
 
   try {
     const res = await calendar.events.list({
       calendarId: 'primary',
-      timeMin: startOfDay.toISOString(),
-      timeMax: endOfDay.toISOString(),
+      timeMin: start.toISOString(),
+      timeMax: end.toISOString(),
       singleEvents: true,
     });
 

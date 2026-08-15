@@ -1,25 +1,15 @@
 import 'dotenv/config';
-import { Telegraf } from 'telegraf';
 import { prisma } from '../db';
+import { createBot } from '../lib/telegram';
 import { isUserOnLeave } from '../services/calendar';
+import { todayWIB, weekdayOf } from '../lib/time';
 
-const bot = new Telegraf(process.env.BOT_TOKEN!);
-
-function nowWIB(): Date {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
-}
-
-function todayDateWIB(): Date {
-  const now = nowWIB();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-}
+const bot = createBot(process.env.BOT_TOKEN!);
 
 async function sendCheckInReminders() {
-  const now = nowWIB();
-  const day = now.getDay();
-  if (day === 0 || day === 6) return; // Skip weekends
-
-  const today = todayDateWIB();
+  const today = todayWIB();
+  const weekday = weekdayOf(today);
+  if (weekday === 0 || weekday === 6) return; // Skip weekends
 
   // Find all verified users
   const users = await prisma.user.findMany();
@@ -31,7 +21,7 @@ async function sendCheckInReminders() {
     });
     if (attendance) continue;
 
-    const onLeave = await isUserOnLeave(user.telegramId, now);
+    const onLeave = await isUserOnLeave(user.telegramId);
     if (onLeave) continue;
 
     await bot.telegram.sendMessage(
@@ -42,11 +32,8 @@ async function sendCheckInReminders() {
 }
 
 async function sendCheckOutReminders() {
-  const now = nowWIB();
-  const day = now.getDay();
-  if (day === 0 || day === 6) return;
-
-  const today = todayDateWIB();
+  const today = todayWIB();
+  if (weekdayOf(today) === 0 || weekdayOf(today) === 6) return;
 
   // Find users who checked in but haven't checked out
   const attendances = await prisma.attendance.findMany({
