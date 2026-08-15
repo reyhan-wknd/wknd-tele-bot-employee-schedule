@@ -115,11 +115,13 @@ async function showSchedule(ctx: any, telegramId: bigint, googleEmail: string) {
   const todaySchedule = await prisma.schedule.findMany({
     where: { employeeNik, date: today },
   });
+  // Data jadwal didahulukan: ada kalanya proyek menjadwalkan WFO di akhir pekan, dan
+  // dulu hari itu tetap tertulis "Day Off" karena harinya diperiksa lebih dulu.
   let todayStatus: string;
-  if (weekday === 0 || weekday === 6) {
-    todayStatus = '🏖️ Day Off';
-  } else if (todaySchedule.length > 0) {
+  if (todaySchedule.length > 0) {
     todayStatus = `🏢 WFO (${todaySchedule.map((s) => s.projectName).join(', ')})`;
+  } else if (weekday === 0 || weekday === 6) {
+    todayStatus = '🏖️ Day Off';
   } else {
     todayStatus = '🏠 WFH';
   }

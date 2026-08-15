@@ -180,7 +180,10 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
         googleEmail: payload.email!,
         googleSub: payload.sub!,
         accessToken: tokens.access_token ?? null,
-        refreshToken: tokens.refresh_token ?? null,
+        // Hanya ditulis bila Google mengirimkannya. Sekarang selalu ada karena URL auth
+        // memakai prompt=consent, tapi tanpa penjagaan ini satu perubahan parameter
+        // akan mengosongkan refresh token yang masih berlaku.
+        ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
       },
       create: {
         telegramId: BigInt(telegramId),
