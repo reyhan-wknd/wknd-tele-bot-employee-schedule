@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '../db';
 import { wibDayBounds } from '../lib/time';
+import { decryptToken, encryptToken } from '../lib/crypto';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
@@ -36,7 +37,7 @@ export async function isUserOnLeave(telegramId: bigint, instant: Date = new Date
   const user = await prisma.user.findUnique({ where: { telegramId } });
   if (!user || !user.accessToken) return false;
 
-  const client = createOAuth2Client(user.accessToken, user.refreshToken);
+  const client = createOAuth2Client(decryptToken(user.accessToken)!, decryptToken(user.refreshToken));
 
   // Refresh token if needed
   // Listener event tidak punya pemanggil yang menunggu, jadi errornya harus ditangkap
@@ -45,7 +46,13 @@ export async function isUserOnLeave(telegramId: bigint, instant: Date = new Date
     if (!tokens.access_token) return;
 
     prisma.user
-      .update({ where: { telegramId }, data: { accessToken: tokens.access_token } })
+      .update({
+        where: { telegramId },
+        data: {
+          accessToken: encryptToken(tokens.access_token),
+          tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        },
+      })
       .catch((err) => console.error(`Gagal menyimpan access token baru untuk ${telegramId}:`, err));
   });
 
@@ -65,7 +72,23 @@ export async function isUserOnLeave(telegramId: bigint, instant: Date = new Date
 
     return (res.data.items ?? []).some(isLeaveEvent);
   } catch (err) {
-    console.error('Google Calendar error:', err);
+    // Kegagalan konfigurasi (API belum diaktifkan, izin dicabut) dulu ikut diserap jadi
+    // "tidak cuti" tanpa jejak yang jelas — fiturnya mati diam-diam. Fail-open tetap
+    // dipertahankan supaya check-in tidak terblokir, tetapi sebabnya harus terbaca.
+    const status = (err as { code?: number; status?: number }).code ?? (err as { status?: number }).status;
+    const alasan = (err as { errors?: { reason?: string }[] }).errors?.[0]?.reason;
+
+    if (status === 403 && alasan === 'accessNotConfigured') {
+      console.error(
+        'DETEKSI CUTI TIDAK AKTIF: Google Calendar API belum diaktifkan untuk project ini. ' +
+          'Selama itu, semua orang dianggap tidak cuti. Aktifkan API-nya di Google Cloud Console.'
+      );
+    } else if (status === 401 || status === 403) {
+      console.error(`Deteksi cuti gagal karena izin (HTTP ${status}, ${alasan ?? 'tanpa alasan'}):`, err);
+    } else {
+      console.error('Google Calendar error:', err);
+    }
+
     return false;
   }
 }

@@ -31,7 +31,8 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - Reminder jadwal minggu depan (Jumat jam 21:00)
 
 ### Token Management
-- Cek validitas Google token setiap hari kerja jam 08:00 WIB
+- Access & refresh token disimpan terenkripsi (AES-256-GCM) di database
+- Cek token setiap hari kerja jam 08:00 WIB memakai kolom masa berlaku, tanpa memanggil Google bila token masih hidup
 - Auto-refresh jika expired, hapus akun & notify user jika refresh gagal
 
 ## Setup
@@ -114,6 +115,8 @@ Isi variabel berikut:
 | `FRONTEND_URL` | URL HTTPS domain (sama dengan tunnel) |
 | `SUPABASE_KEY` | Supabase anon key untuk fetch jadwal |
 | `ALLOWED_EMAIL_DOMAINS` | Domain email yang boleh login, pisahkan koma (default: `weekendinc.com`) |
+| `TOKEN_ENCRYPTION_KEY` | Kunci enkripsi token OAuth di database, 32 byte base64 (wajib) |
+| `AUTH_RATE_LIMIT` | Batas permintaan /auth per menit per IP (default: 10) |
 
 ### 7. Install & Run
 

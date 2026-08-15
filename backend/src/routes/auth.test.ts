@@ -52,6 +52,7 @@ beforeAll(async () => {
   vi.stubEnv('FRONTEND_URL', 'https://contoh.test');
   vi.stubEnv('ALLOWED_EMAIL_DOMAINS', 'weekendinc.com');
   vi.stubEnv('AUTH_RATE_LIMIT', '1000'); // rate limit tidak boleh mengganggu urutan tes
+  vi.stubEnv('TOKEN_ENCRYPTION_KEY', crypto.randomBytes(32).toString('base64'));
 
   const { authRouter } = await import('./auth');
   jwt = await import('jsonwebtoken');
@@ -149,6 +150,24 @@ describe('GET /auth/google/callback', () => {
     expect(res.headers.get('location')).toBe('https://contoh.test/success.html');
     expect(prismaTiruan.user.upsert).toHaveBeenCalledOnce();
     expect(pairUserByEmail).toHaveBeenCalledWith(839050319n, 'reyhan.ramadhan@weekendinc.com');
+  });
+
+  test('token disimpan dalam bentuk terenkripsi, bukan apa adanya', async () => {
+    await panggilCallback(`code=kode&state=${stateSah()}`);
+
+    const data = prismaTiruan.user.upsert.mock.calls[0][0].create;
+    expect(data.accessToken).not.toBe('access');
+    expect(data.refreshToken).not.toBe('refresh');
+    expect(data.accessToken.startsWith('v1:')).toBe(true);
+    expect(data.refreshToken.startsWith('v1:')).toBe(true);
+  });
+
+  test('masa berlaku token ikut disimpan supaya cron tidak perlu memanggil Google', async () => {
+    tokenGoogle = { ...tokenGoogle, expiry_date: 1_800_000_000_000 };
+
+    await panggilCallback(`code=kode&state=${stateSah()}`);
+
+    expect(prismaTiruan.user.upsert.mock.calls[0][0].create.tokenExpiry).toEqual(new Date(1_800_000_000_000));
   });
 
   test('akun di luar domain ditolak sebelum apa pun tersimpan', async () => {

@@ -1,4 +1,5 @@
 import { prisma } from '../db';
+import { decryptToken } from '../lib/crypto';
 
 /**
  * Hapus tautan akun beserta data turunannya.
@@ -20,7 +21,7 @@ export async function unlinkUser(telegramId: bigint): Promise<void> {
 
   // Menghapus baris tidak mencabut izinnya di sisi Google — tanpa ini, aplikasi tetap
   // tercantum di halaman izin akun user meski tautannya sudah dihapus.
-  await revokeGoogleToken(user?.refreshToken ?? user?.accessToken ?? null);
+  await revokeGoogleToken(decryptToken(user?.refreshToken ?? user?.accessToken));
 }
 
 async function revokeGoogleToken(token: string | null): Promise<void> {

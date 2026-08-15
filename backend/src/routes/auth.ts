@@ -8,6 +8,7 @@ import { bot } from '../bot';
 import { ALLOWED_EMAIL_DOMAINS, isAllowedEmail } from '../config';
 import { pairUserByEmail } from '../services/schedule';
 import { unlinkUser } from '../services/user';
+import { encryptToken } from '../lib/crypto';
 
 export const authRouter = Router();
 
@@ -179,18 +180,20 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
       update: {
         googleEmail: payload.email!,
         googleSub: payload.sub!,
-        accessToken: tokens.access_token ?? null,
+        accessToken: tokens.access_token ? encryptToken(tokens.access_token) : null,
+        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
         // Hanya ditulis bila Google mengirimkannya. Sekarang selalu ada karena URL auth
         // memakai prompt=consent, tapi tanpa penjagaan ini satu perubahan parameter
         // akan mengosongkan refresh token yang masih berlaku.
-        ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
+        ...(tokens.refresh_token ? { refreshToken: encryptToken(tokens.refresh_token) } : {}),
       },
       create: {
         telegramId: BigInt(telegramId),
         googleEmail: payload.email!,
         googleSub: payload.sub!,
-        accessToken: tokens.access_token ?? null,
-        refreshToken: tokens.refresh_token ?? null,
+        accessToken: tokens.access_token ? encryptToken(tokens.access_token) : null,
+        refreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
+        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
       },
     });
 
