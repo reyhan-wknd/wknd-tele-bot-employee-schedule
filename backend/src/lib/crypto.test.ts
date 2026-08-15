@@ -13,14 +13,14 @@ afterEach(() => vi.unstubAllEnvs());
 describe('encryptToken / decryptToken', () => {
   test('nilai kembali utuh setelah bolak-balik', () => {
     denganKunci();
-    const token = 'ya29.a0AQvPyI-contoh_token';
+    const token = 'ya29.CONTOH-access-token';
 
     expect(decryptToken(encryptToken(token))).toBe(token);
   });
 
   test('hasil enkripsi tidak memuat teks aslinya', () => {
     denganKunci();
-    const hasil = encryptToken('1//0g-refresh-token');
+    const hasil = encryptToken('1//0-CONTOH-refresh-token');
 
     expect(hasil).not.toContain('refresh-token');
     expect(hasil.startsWith('v1:')).toBe(true);
@@ -35,7 +35,7 @@ describe('encryptToken / decryptToken', () => {
   test('token lama yang masih polos dibaca apa adanya', () => {
     denganKunci();
 
-    expect(decryptToken('ya29.token-lama-belum-terenkripsi')).toBe('ya29.token-lama-belum-terenkripsi');
+    expect(decryptToken('ya29.CONTOH-token-lama-belum-terenkripsi')).toBe('ya29.CONTOH-token-lama-belum-terenkripsi');
     expect(belumTerenkripsi('ya29.token-lama')).toBe(true);
     expect(belumTerenkripsi(encryptToken('baru'))).toBe(false);
   });
