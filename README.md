@@ -20,7 +20,8 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 ### Absensi
 - `/check_in` — absen masuk (min. jam 08:00 WIB, hari kerja, bukan cuti)
 - `/check_out` — absen pulang (min. jam 18:00 WIB, min. 8 jam setelah check-in)
-- Deteksi cuti otomatis dari Google Calendar (event outOfOffice / keyword)
+- Deteksi cuti otomatis dari Google Calendar: event bertipe **Out of office** — judul tidak diperiksa
+- Satu event Out of office membuat hari itu terhitung cuti penuh, berapa pun durasinya
 - Reminder check-in (09:30, 09:50) dan check-out (18:00, 21:00, 23:00)
 
 ### Jadwal WFO

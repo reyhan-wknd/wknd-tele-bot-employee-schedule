@@ -7,21 +7,19 @@ import { decryptToken, encryptToken } from '../lib/crypto';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
 
-/**
- * Dicocokkan dengan batas kata, bukan substring. Kata `off` sendirian sengaja tidak ada:
- * dulu ia membuat "Ke office pagi", "Coffee chat", dan "Kickoff project" terbaca sebagai cuti.
- */
-const LEAVE_TITLE_PATTERN = /\b(cuti|izin|leave|day[\s-]?off|off[\s-]?day|out[\s-]?of[\s-]?office|pto|ooo)\b/i;
-
 export interface CalendarEventLike {
   eventType?: string | null;
-  summary?: string | null;
 }
 
-/** Event dianggap cuti bila tipenya outOfOffice, atau judulnya menyebut cuti secara utuh. */
+/**
+ * Cuti ditentukan semata-mata oleh tipe event "Out of office" bawaan Google Calendar.
+ *
+ * Judul sengaja tidak ikut diperiksa: mencocokkan kata pernah membuat "Ke office pagi"
+ * dan "Coffee chat" terbaca sebagai cuti, sementara tipe event adalah penanda eksplisit
+ * yang memang dibuat Google untuk maksud ini.
+ */
 export function isLeaveEvent(event: CalendarEventLike): boolean {
-  if (event.eventType === 'outOfOffice') return true;
-  return LEAVE_TITLE_PATTERN.test(event.summary ?? '');
+  return event.eventType === 'outOfOffice';
 }
 
 function createOAuth2Client(accessToken: string, refreshToken: string | null): OAuth2Client {
