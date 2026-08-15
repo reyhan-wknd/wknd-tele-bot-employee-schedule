@@ -133,9 +133,9 @@ Development (foreground, auto-reload):
 npm run dev
 ```
 
-Background (tanpa watch):
+Background (dikelola systemd, auto-restart):
 ```bash
-nohup npx tsx src/index.ts > nohup.out 2>&1 &
+systemctl --user start wknd-tele-bot
 ```
 
 ### 8. Frontend
@@ -144,21 +144,23 @@ Backend sudah serve folder `frontend/` sebagai static files, dan Mini App memang
 
 ### 9. Cron Jobs
 
+Semua cron job berjalan **otomatis di dalam proses backend** via `node-cron`
+(`backend/src/scheduler.ts`), dengan `timezone: 'Asia/Jakarta'`. Tidak perlu memasang
+crontab sama sekali.
+
+Perhitungan waktu di dalam kode juga tidak bergantung pada zona waktu mesin — semuanya
+lewat `src/lib/time.ts`, jadi hasilnya sama di host UTC maupun WIB.
+
+Tiap job masih bisa dijalankan manual bila perlu, misalnya untuk memaksa sync:
+
 ```bash
-crontab backend/crontab.txt
+cd backend
+npx tsx src/cron/sync-schedules.ts
+npx tsx src/cron/reminder.ts checkin
+npx tsx src/cron/reminder-wfo.ts weekly
 ```
 
-Pastikan folder `backend/logs/` sudah dibuat:
-```bash
-mkdir -p backend/logs
-```
-
-Jam di `crontab.txt` ditulis dalam WIB dan dikunci lewat `CRON_TZ=Asia/Jakarta`, jadi
-jadwalnya sama saja apakah mesin deploy berjalan di UTC atau WIB. Kode aplikasinya
-sendiri juga tidak bergantung pada TZ host — semua perhitungan waktu lewat
-`src/lib/time.ts`.
-
-#### Daftar Cron Jobs
+#### Daftar Job
 
 | Waktu (WIB) | Hari | Fungsi |
 |---|---|---|
@@ -208,7 +210,6 @@ dari sisi klien.
 ├── package.json
 ├── backend/
 │   ├── .env.example
-│   ├── crontab.txt
 │   ├── prisma/
 │   │   └── schema.prisma
 │   ├── deploy/
@@ -218,6 +219,7 @@ dari sisi klien.
 │   └── src/
 │       ├── index.ts              # Express server entry
 │       ├── bot.ts                # Telegraf bot + commands
+│       ├── scheduler.ts          # node-cron job registration
 │       ├── db.ts                 # Prisma client
 │       ├── config.ts             # Domain email yang diizinkan
 │       ├── lib/

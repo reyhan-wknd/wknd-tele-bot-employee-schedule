@@ -339,8 +339,26 @@ bot.command('logout', async (ctx) => {
   await reply(ctx, `🔓 Akun Google (${user.googleEmail}) berhasil di-unlink.`);
 });
 
+/** Daftar perintah yang muncul di menu Telegram. */
+const BOT_COMMANDS = [
+  { command: 'start', description: 'Lihat daftar perintah' },
+  { command: 'login', description: 'Hubungkan akun Google' },
+  { command: 'logout', description: 'Hapus koneksi akun Google' },
+  { command: 'status', description: 'Cek status verifikasi & absensi hari ini' },
+  { command: 'schedule', description: 'Lihat jadwal WFO minggu ini & minggu depan' },
+  { command: 'check_in', description: 'Absen masuk (min. 08:00 WIB)' },
+  { command: 'check_out', description: 'Absen pulang (min. 18:00 WIB)' },
+];
+
 export async function launchBot(app?: Express) {
   const mode = process.env.BOT_MODE || 'polling';
+
+  // Gagal mendaftarkan menu perintah tidak boleh menghentikan startup.
+  await bot.telegram
+    .setMyCommands(BOT_COMMANDS)
+    .catch((err) => console.error('Gagal mendaftarkan daftar perintah:', errorMessage(err)));
+
+  bot.telegram.setMyCommands(BOT_COMMANDS);
 
   if (mode === 'webhook') {
     // Path tidak lagi memuat BOT_TOKEN: dulu token itu ikut tercetak ke log setiap

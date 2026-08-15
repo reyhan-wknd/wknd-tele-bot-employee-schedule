@@ -7,7 +7,7 @@ import { unlinkUser } from '../services/user';
 
 const bot = createBot(process.env.BOT_TOKEN!);
 
-async function checkTokens() {
+export async function checkTokens() {
   const users = await prisma.user.findMany({ where: { refreshToken: { not: null } } });
   const hasil = { lewati: 0, disegarkan: 0, dihapus: 0, gagalSementara: 0 };
 
@@ -71,12 +71,7 @@ async function checkTokens() {
   );
 }
 
-async function main() {
-  await checkTokens();
-  await prisma.$disconnect();
+// Tetap bisa dijalankan manual: npx tsx src/cron/check-tokens.ts
+if (typeof require !== 'undefined' && require.main === module) {
+  void checkTokens().finally(() => prisma.$disconnect());
 }
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

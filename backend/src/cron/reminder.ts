@@ -6,7 +6,7 @@ import { todayWIB, weekdayOf } from '../lib/time';
 
 const bot = createBot(process.env.BOT_TOKEN!);
 
-async function sendCheckInReminders() {
+export async function sendCheckInReminders() {
   const today = todayWIB();
   const weekday = weekdayOf(today);
   if (weekday === 0 || weekday === 6) {
@@ -35,7 +35,7 @@ async function sendCheckInReminders() {
   console.log(`Reminder check-in: ${users.length} user diperiksa, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
 }
 
-async function sendCheckOutReminders() {
+export async function sendCheckOutReminders() {
   const today = todayWIB();
   if (weekdayOf(today) === 0 || weekdayOf(today) === 6) {
     console.log('Reminder check-out: akhir pekan, dilewati');
@@ -58,22 +58,15 @@ async function sendCheckOutReminders() {
   console.log(`Reminder check-out: ${attendances.length} absensi terbuka, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
 }
 
-async function main() {
-  const type = process.argv[2]; // 'checkin' or 'checkout'
+// Tetap bisa dijalankan manual: npx tsx src/cron/reminder.ts <checkin|checkout>
+if (typeof require !== 'undefined' && require.main === module) {
+  const jenis = process.argv[2];
+  const tugas = jenis === 'checkin' ? sendCheckInReminders : jenis === 'checkout' ? sendCheckOutReminders : null;
 
-  if (type === 'checkin') {
-    await sendCheckInReminders();
-  } else if (type === 'checkout') {
-    await sendCheckOutReminders();
-  } else {
+  if (!tugas) {
     console.error('Usage: tsx src/cron/reminder.ts <checkin|checkout>');
     process.exit(1);
   }
 
-  await prisma.$disconnect();
+  void tugas().finally(() => prisma.$disconnect());
 }
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

@@ -21,7 +21,7 @@ async function pairingUserAktif() {
   return userSchedules.filter((us) => aktif.has(us.telegramId.toString()));
 }
 
-async function remindTomorrow() {
+export async function remindTomorrow() {
   const tomorrowDate = addDays(todayWIB(), 1);
   const userSchedules = await pairingUserAktif();
 
@@ -46,7 +46,7 @@ async function remindTomorrow() {
   console.log(`Reminder WFO besok: ${userSchedules.length} pairing diperiksa, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
 }
 
-async function remindNextWeek() {
+export async function remindNextWeek() {
   // Senin sampai Jumat minggu depan
   const today = todayWIB();
   const weekday = weekdayOf(today); // Jumat = 5
@@ -79,22 +79,15 @@ async function remindNextWeek() {
   console.log(`Reminder jadwal minggu depan: ${userSchedules.length} pairing diperiksa, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
 }
 
-async function main() {
-  const type = process.argv[2]; // 'tomorrow' or 'weekly'
+// Tetap bisa dijalankan manual: npx tsx src/cron/reminder-wfo.ts <tomorrow|weekly>
+if (typeof require !== 'undefined' && require.main === module) {
+  const jenis = process.argv[2];
+  const tugas = jenis === 'tomorrow' ? remindTomorrow : jenis === 'weekly' ? remindNextWeek : null;
 
-  if (type === 'tomorrow') {
-    await remindTomorrow();
-  } else if (type === 'weekly') {
-    await remindNextWeek();
-  } else {
+  if (!tugas) {
     console.error('Usage: tsx src/cron/reminder-wfo.ts <tomorrow|weekly>');
     process.exit(1);
   }
 
-  await prisma.$disconnect();
+  void tugas().finally(() => prisma.$disconnect());
 }
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});

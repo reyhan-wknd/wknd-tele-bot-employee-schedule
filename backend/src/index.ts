@@ -3,6 +3,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 import path from 'path';
 import { launchBot } from './bot';
+import { startScheduler } from './scheduler';
 import { authRouter } from './routes/auth';
 import { APP_TIME_ZONE } from './lib/time';
 
@@ -30,7 +31,8 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Satu permintaan atau listener yang gagal tidak boleh mematikan seluruh layanan.
+// Satu permintaan atau listener yang gagal tidak boleh mematikan seluruh layanan —
+// termasuk job scheduler yang berjalan di proses yang sama.
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection (proses tetap jalan):', reason);
 });
@@ -45,4 +47,5 @@ process.on('uncaughtException', (err) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT} (zona waktu aplikasi: ${APP_TIME_ZONE})`);
   void launchBot(app);
+  startScheduler();
 });

@@ -1,43 +1,7 @@
-# Crontab bot absensi & jadwal WFO — semua jam ditulis dalam WIB.
+# Semua cron job dikelola oleh node-cron di dalam proses backend (src/scheduler.ts).
+# Backend dan cloudflared tunnel dikelola sebagai systemd user services:
 #
-# CRON_TZ mengunci jadwal ke Asia/Jakarta, jadi file ini berperilaku sama di mesin
-# ber-TZ UTC maupun WIB. Tanpa baris itu, cron memakai zona waktu lokal host dan
-# jamnya ikut bergeser. (CRON_TZ didukung cron bawaan Debian/Ubuntu dan cronie;
-# kalau host memakai cron lain, pastikan dulu variabel ini dikenali.)
+#   ~/.config/systemd/user/wknd-tele-bot.service
+#   ~/.config/systemd/user/cloudflared-wknd.service
 #
-# Install: crontab backend/crontab.txt
-# Cek hasilnya: crontab -l
-# Sesuaikan PROJECT bila path deploy-nya berbeda.
-
-CRON_TZ=Asia/Jakarta
-TZ=Asia/Jakarta
-
-# PATH bawaan cron hanya /usr/bin:/bin, sedangkan npx dipasang lewat nvm — tanpa baris
-# ini semua job gagal diam-diam dengan "npx: command not found". Sesuaikan versinya.
-PATH=/home/reyhanr/.nvm/versions/node/v22.14.0/bin:/usr/local/bin:/usr/bin:/bin
-NODE_OPTIONS=--dns-result-order=ipv4first
-
-# Keduanya harus absolut. Cron tidak mengembangkan variabel di dalam assignment, dan
-# shell tidak mengembangkan hasil ekspansi untuk kedua kalinya — dengan `LOG=$PROJECT/logs`
-# redirect-nya gagal dan perintahnya tidak pernah dijalankan sama sekali.
-PROJECT=/home/reyhanr/wknd/projects/wknd-tele-bot-employee-schedule/backend
-LOG=/home/reyhanr/wknd/projects/wknd-tele-bot-employee-schedule/backend/logs
-
-# Sync jadwal dari Supabase — 20:00 WIB, setiap hari
-0 20 * * * cd $PROJECT && npx tsx src/cron/sync-schedules.ts >> $LOG/sync-schedules.log 2>&1
-
-# Cek validitas token Google — 08:00 WIB, Senin-Jumat
-0 8 * * 1-5 cd $PROJECT && npx tsx src/cron/check-tokens.ts >> $LOG/check-tokens.log 2>&1
-
-# Reminder check-in — 09:30 dan 09:50 WIB, Senin-Jumat
-30 9 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
-50 9 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkin >> $LOG/reminder.log 2>&1
-
-# Reminder check-out — 18:00, 21:00, dan 23:00 WIB, Senin-Jumat
-0 18,21,23 * * 1-5 cd $PROJECT && npx tsx src/cron/reminder.ts checkout >> $LOG/reminder.log 2>&1
-
-# Reminder WFO besok — 21:00 WIB, Senin-Kamis
-0 21 * * 1-4 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts tomorrow >> $LOG/reminder-wfo.log 2>&1
-
-# Reminder jadwal minggu depan — 21:00 WIB, Jumat
-0 21 * * 5 cd $PROJECT && npx tsx src/cron/reminder-wfo.ts weekly >> $LOG/reminder-wfo.log 2>&1
+# Tidak ada crontab yang perlu dipasang.
