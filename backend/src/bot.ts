@@ -13,6 +13,7 @@ import {
   weekdayOf,
 } from './lib/time';
 import { formatProjects, groupSchedulesByDate } from './lib/schedule';
+import { bolehCheckin, bolehCheckout, durasiKerja, selisihJam } from './services/attendance';
 import { createBot } from './lib/telegram';
 
 const BOT_TOKEN = process.env.BOT_TOKEN!;
@@ -203,14 +204,14 @@ bot.command('check_in', async (ctx) => {
 
   const today = todayWIB();
 
-  const weekday = weekdayOf(today);
-  if (weekday === 0 || weekday === 6) {
-    await reply(ctx, '❌ Check-in hanya bisa dilakukan di hari kerja (Senin-Jumat).');
-    return;
-  }
-
-  if (hourWIB() < 8) {
-    await reply(ctx, '❌ Check-in hanya bisa dilakukan mulai jam 08:00 WIB.');
+  const izin = bolehCheckin(weekdayOf(today), hourWIB());
+  if (!izin.boleh) {
+    await reply(
+      ctx,
+      izin.alasan === 'akhir-pekan'
+        ? '❌ Check-in hanya bisa dilakukan di hari kerja (Senin-Jumat).'
+        : '❌ Check-in hanya bisa dilakukan mulai jam 08:00 WIB.'
+    );
     return;
   }
 
@@ -271,19 +272,17 @@ bot.command('check_out', async (ctx) => {
   }
 
   const lanjutanKemarin = attendance.date.getTime() !== today.getTime();
-
-  // Batas jam 18:00 hanya berlaku untuk shift hari ini; yang lewat tengah malam sudah
-  // jelas melewatinya, dan tetap dijaga aturan minimal 8 jam di bawah.
-  if (!lanjutanKemarin && hourWIB() < 18) {
-    await reply(ctx, '❌ Check-out hanya bisa dilakukan mulai jam 18:00 WIB.');
-    return;
-  }
-
   const realNow = new Date();
-  const diffHours = (realNow.getTime() - attendance.checkIn.getTime()) / (1000 * 60 * 60);
-  if (diffHours < 8) {
-    const remaining = Math.ceil((8 - diffHours) * 60);
-    await reply(ctx, `❌ Minimal 8 jam setelah check-in. Sisa ${remaining} menit lagi.`);
+  const jamKerja = selisihJam(attendance.checkIn, realNow);
+
+  const izin = bolehCheckout({ lanjutanKemarin, jamWIB: hourWIB(), jamKerja });
+  if (!izin.boleh) {
+    await reply(
+      ctx,
+      izin.alasan === 'belum-jam-pulang'
+        ? '❌ Check-out hanya bisa dilakukan mulai jam 18:00 WIB.'
+        : `❌ Minimal 8 jam setelah check-in. Sisa ${izin.sisaMenit} menit lagi.`
+    );
     return;
   }
 
@@ -292,13 +291,12 @@ bot.command('check_out', async (ctx) => {
     data: { checkOut: realNow },
   });
 
-  const durationHours = Math.floor(diffHours);
-  const durationMins = Math.round((diffHours - durationHours) * 60);
+  const durasi = durasiKerja(jamKerja);
 
   const keterangan = lanjutanKemarin ? `\n📅 Untuk absensi ${formatDateOnly(attendance.date)}` : '';
   await reply(
     ctx,
-    `✅ Check-out berhasil!\n\n🕐 ${formatTimeWIB(realNow)}\n⏱️ Durasi kerja: ${durationHours}j ${durationMins}m${keterangan}`
+    `✅ Check-out berhasil!\n\n🕐 ${formatTimeWIB(realNow)}\n⏱️ Durasi kerja: ${durasi.jam}j ${durasi.menit}m${keterangan}`
   );
 });
 
@@ -323,8 +321,8 @@ bot.command('status', async (ctx) => {
     attendanceInfo += `  Check-in: ${formatTimeWIB(attendance.checkIn)}`;
     if (attendance.checkOut) {
       attendanceInfo += `\n  Check-out: ${formatTimeWIB(attendance.checkOut)}`;
-      const diff = (attendance.checkOut.getTime() - attendance.checkIn.getTime()) / (1000 * 60 * 60);
-      attendanceInfo += `\n  Durasi: ${Math.floor(diff)}j ${Math.round((diff % 1) * 60)}m`;
+      const durasi = durasiKerja(selisihJam(attendance.checkIn, attendance.checkOut));
+      attendanceInfo += `\n  Durasi: ${durasi.jam}j ${durasi.menit}m`;
     } else {
       attendanceInfo += '\n  Check-out: Belum';
     }

@@ -24,10 +24,10 @@ function createOAuthClient(): OAuth2Client {
   return new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
 }
 
-// Rate limiting: 10 requests per minute per IP
+// Rate limiting per IP. Bisa dinaikkan lewat env untuk keperluan pengujian.
 const authLimiter = rateLimit({
   windowMs: 60_000,
-  max: 10,
+  max: Number(process.env.AUTH_RATE_LIMIT ?? 10),
   message: { error: 'Too many requests, try again later' },
 });
 
