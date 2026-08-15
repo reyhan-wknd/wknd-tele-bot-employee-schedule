@@ -20,18 +20,20 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 ### Absensi
 - `/check_in` — absen masuk (min. jam 08:00 WIB, hari kerja, bukan cuti)
 - `/check_out` — absen pulang (min. jam 18:00 WIB, min. 8 jam setelah check-in)
-- Deteksi cuti otomatis dari Google Calendar (event outOfOffice / keyword)
+- Deteksi cuti otomatis dari Google Calendar: event bertipe **Out of office** — judul tidak diperiksa
+- Satu event Out of office membuat hari itu terhitung cuti penuh, berapa pun durasinya
 - Reminder check-in (09:30, 09:50) dan check-out (18:00, 21:00, 23:00)
 
 ### Jadwal WFO
 - `/schedule` — lihat jadwal WFO minggu ini + minggu depan (Minggu–Sabtu)
-- Auto-pairing user dengan data employee (via nama email atau NIK)
+- Auto-pairing user dengan data employee lewat email terverifikasi Google
 - Data di-sync dari Supabase setiap hari jam 20:00 WIB
 - Reminder WFO besok (Senin-Kamis jam 21:00)
 - Reminder jadwal minggu depan (Jumat jam 21:00)
 
 ### Token Management
-- Cek validitas Google token setiap hari kerja jam 08:00 WIB
+- Access & refresh token disimpan terenkripsi (AES-256-GCM) di database
+- Cek token setiap hari kerja jam 08:00 WIB memakai kolom masa berlaku, tanpa memanggil Google bila token masih hidup
 - Auto-refresh jika expired, hapus akun & notify user jika refresh gagal
 
 ## Setup
@@ -113,6 +115,9 @@ Isi variabel berikut:
 | `JWT_SECRET` | Secret untuk sign state token |
 | `FRONTEND_URL` | URL HTTPS domain (sama dengan tunnel) |
 | `SUPABASE_KEY` | Supabase anon key untuk fetch jadwal |
+| `ALLOWED_EMAIL_DOMAINS` | Domain email yang boleh login, pisahkan koma (default: `weekendinc.com`) |
+| `TOKEN_ENCRYPTION_KEY` | Kunci enkripsi token OAuth di database, 32 byte base64 (wajib) |
+| `AUTH_RATE_LIMIT` | Batas permintaan /auth per menit per IP (default: 10) |
 
 ### 7. Install & Run
 
@@ -135,11 +140,27 @@ systemctl --user start wknd-tele-bot
 
 ### 8. Frontend
 
-Backend sudah serve folder `frontend/` sebagai static files. Pastikan `BACKEND_URL` di `frontend/index.html` sesuai dengan domain tunnel.
+Backend sudah serve folder `frontend/` sebagai static files, dan Mini App memanggil backend lewat `window.location.origin` — tidak ada URL yang perlu disesuaikan.
 
 ### 9. Cron Jobs
 
-Semua cron job berjalan **otomatis di dalam proses backend** via `node-cron` (dikelola `backend/src/scheduler.ts`). Tidak perlu setup crontab manual.
+Semua cron job berjalan **otomatis di dalam proses backend** via `node-cron`
+(`backend/src/scheduler.ts`), dengan `timezone: 'Asia/Jakarta'`. Tidak perlu memasang
+crontab sama sekali.
+
+Perhitungan waktu di dalam kode juga tidak bergantung pada zona waktu mesin — semuanya
+lewat `src/lib/time.ts`, jadi hasilnya sama di host UTC maupun WIB.
+
+Tiap job masih bisa dijalankan manual bila perlu, misalnya untuk memaksa sync:
+
+```bash
+cd backend
+npx tsx src/cron/sync-schedules.ts
+npx tsx src/cron/reminder.ts checkin
+npx tsx src/cron/reminder-wfo.ts weekly
+```
+
+#### Daftar Job
 
 | Waktu (WIB) | Hari | Fungsi |
 |---|---|---|
@@ -167,16 +188,19 @@ Semua cron job berjalan **otomatis di dalam proses backend** via `node-cron` (di
 4. Backend return Google OAuth URL
 5. User login Google, consent
 6. Google redirect ke backend callback
-7. Backend simpan mapping telegram_id ↔ google_email
-8. Bot kirim pesan konfirmasi + auto-trigger schedule pairing
-9. Mini App auto-close
+7. Backend cek domain email — hanya `ALLOWED_EMAIL_DOMAINS` yang diterima
+8. Backend simpan mapping telegram_id ↔ google_email
+9. Bot kirim pesan konfirmasi + auto-pairing data karyawan
+10. Mini App auto-close
 
 ### Schedule Pairing
-1. Sistem baca nama dari email, cari di table schedules
-2. Jika ditemukan 1 → konfirmasi via button
-3. Jika ditemukan > 1 → pilih via button
-4. Jika tidak ditemukan → fallback cari via NIK
-5. Setelah paired, otomatis tampilkan jadwal WFO
+1. Backend mencari karyawan di tabel `employees` Supabase dengan email yang sama persis
+2. Ketemu → NIK-nya langsung disimpan, tanpa konfirmasi ke user
+3. Tidak ketemu → user diminta menghubungi admin; `/schedule` akan mencoba lagi
+
+Identitas ditentukan sepenuhnya oleh email yang tanda tangannya diverifikasi Google.
+User tidak pernah memilih atau mengetik NIK, sehingga tidak ada NIK yang bisa dipaksakan
+dari sisi klien.
 
 ## Project Structure
 
@@ -188,17 +212,31 @@ Semua cron job berjalan **otomatis di dalam proses backend** via `node-cron` (di
 │   ├── .env.example
 │   ├── prisma/
 │   │   └── schema.prisma
+│   ├── deploy/
+│   │   └── wknd-tele-bot.service # Unit systemd (Restart=always)
+│   ├── scripts/
+│   │   └── dump-db.sh            # Dump DB tanpa data tabel users
 │   └── src/
 │       ├── index.ts              # Express server entry
 │       ├── bot.ts                # Telegraf bot + commands
 │       ├── scheduler.ts          # node-cron job registration
 │       ├── db.ts                 # Prisma client
+│       ├── config.ts             # Domain email yang diizinkan
+│       ├── lib/
+│       │   ├── crypto.ts         # Enkripsi token OAuth
+│       │   ├── schedule.ts       # Pengelompokan jadwal per tanggal
+│       │   ├── sync-guard.ts     # Penjaga kewarasan hasil sync
+│       │   ├── telegram.ts       # Klien Telegram + pengiriman massal
+│       │   ├── time.ts           # Semua perhitungan waktu WIB
+│       │   └── token.ts          # Masa berlaku access token
 │       ├── routes/
 │       │   └── auth.ts           # OAuth endpoints
 │       ├── services/
+│       │   ├── attendance.ts     # Aturan check-in/check-out
 │       │   ├── calendar.ts       # Google Calendar cuti detection
 │       │   ├── schedule.ts       # Schedule pairing logic
-│       │   └── supabase.ts       # Supabase data fetch
+│       │   ├── supabase.ts       # Supabase data fetch
+│       │   └── user.ts           # Hapus tautan akun + revoke token
 │       └── cron/
 │           ├── check-tokens.ts   # Token validity check
 │           ├── reminder.ts       # Attendance reminders

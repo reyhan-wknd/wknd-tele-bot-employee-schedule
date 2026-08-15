@@ -1,5 +1,7 @@
 {
   "name": "wknd-tele-bot-employee-schedule",
   "private": true,
-  "workspaces": ["backend", "frontend"]
+  "workspaces": [
+    "backend"
+  ]
 }

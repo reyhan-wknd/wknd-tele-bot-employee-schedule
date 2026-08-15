@@ -5,3 +5,12 @@ dist/
 logs/
 nohup.out
 backend/src/generated/
+
+# Dump database — berisi token OAuth, jangan pernah di-commit.
+# Pola di-anchor ke root supaya backend/prisma/migrations/**/migration.sql tetap ter-track.
+/*.sql
+/*.sql.gz
+*.dump
+
+# State tooling lokal
+.omc/

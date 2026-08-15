@@ -5,7 +5,10 @@ import { OAuth2Client } from 'google-auth-library';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../db';
 import { bot } from '../bot';
-import { findEmployeesByName, extractNameFromEmail } from '../services/schedule';
+import { ALLOWED_EMAIL_DOMAINS, isAllowedEmail } from '../config';
+import { pairUserByEmail } from '../services/schedule';
+import { unlinkUser } from '../services/user';
+import { encryptToken } from '../lib/crypto';
 
 export const authRouter = Router();
 
@@ -16,12 +19,16 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI!;
 const FRONTEND_URL = process.env.FRONTEND_URL!;
 
-const oauth2Client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+/** Dibuat per permintaan: instance modul-level dimutasi setCredentials, dan dua login
+ *  yang berjalan bersamaan akan saling menimpa kredensial pada objek yang sama. */
+function createOAuthClient(): OAuth2Client {
+  return new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+}
 
-// Rate limiting: 10 requests per minute per IP
+// Rate limiting per IP. Bisa dinaikkan lewat env untuk keperluan pengujian.
 const authLimiter = rateLimit({
   windowMs: 60_000,
-  max: 10,
+  max: Number(process.env.AUTH_RATE_LIMIT ?? 10),
   message: { error: 'Too many requests, try again later' },
 });
 
@@ -41,6 +48,9 @@ function validateInitData(initData: string): { valid: boolean; user?: { id: numb
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
   const computedHash = crypto.createHmac('sha256', secretKey).update(entries).digest('hex');
 
+  // timingSafeEqual melempar RangeError bila panjangnya berbeda, dan `hash` datang dari
+  // input — tanpa cek ini, initData cacat menghasilkan 500, bukan 401.
+  if (computedHash.length !== hash.length) return { valid: false };
   if (!crypto.timingSafeEqual(Buffer.from(computedHash), Buffer.from(hash))) {
     return { valid: false };
   }
@@ -89,6 +99,12 @@ authRouter.post('/init', (req: Request, res: Response) => {
   googleAuthUrl.searchParams.set('prompt', 'consent');
   googleAuthUrl.searchParams.set('state', state);
 
+  // Filter pemilih akun Google. Google hanya menerima satu nilai, dan parameter ini
+  // bisa diabaikan klien — gerbang sebenarnya ada di callback.
+  if (ALLOWED_EMAIL_DOMAINS.length === 1) {
+    googleAuthUrl.searchParams.set('hd', ALLOWED_EMAIL_DOMAINS[0]);
+  }
+
   res.json({ url: googleAuthUrl.toString() });
 });
 
@@ -119,6 +135,7 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
 
   // Exchange code for tokens
   try {
+    const oauth2Client = createOAuthClient();
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
@@ -133,20 +150,50 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
       return;
     }
 
+    // Hanya akun perusahaan yang boleh ditautkan. Sumber kebenarannya adalah email di
+    // ID token yang tanda tangannya sudah diverifikasi, bukan parameter `hd` di URL.
+    // Gerbang ini berjalan sebelum upsert supaya token akun luar tidak pernah tersimpan.
+    if (!payload.email || !isAllowedEmail(payload.email)) {
+      await bot.telegram
+        .sendMessage(
+          telegramId,
+          `❌ Verifikasi gagal. Gunakan akun Google perusahaan (@${ALLOWED_EMAIL_DOMAINS.join(', @')}).`
+        )
+        .catch((err) => console.error('Gagal mengirim notifikasi penolakan domain:', err));
+      res.redirect(`${FRONTEND_URL}/index.html?error=domain`);
+      return;
+    }
+
+    // Akun Google ini mungkin masih tertaut ke Telegram lama (ganti HP/akun). Pemilik
+    // email sudah membuktikan kepemilikannya lewat OAuth, jadi tautan lama dipindahkan
+    // — kalau tidak, upsert menabrak unique constraint dan user cuma melihat 500.
+    const tautanLama = await prisma.user.findFirst({
+      where: { googleEmail: payload.email, telegramId: { not: BigInt(telegramId) } },
+    });
+    if (tautanLama) {
+      console.log(`Memindahkan tautan ${payload.email} dari ${tautanLama.telegramId} ke ${telegramId}`);
+      await unlinkUser(tautanLama.telegramId);
+    }
+
     await prisma.user.upsert({
       where: { telegramId: BigInt(telegramId) },
       update: {
         googleEmail: payload.email!,
         googleSub: payload.sub!,
-        accessToken: tokens.access_token ?? null,
-        refreshToken: tokens.refresh_token ?? null,
+        accessToken: tokens.access_token ? encryptToken(tokens.access_token) : null,
+        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        // Hanya ditulis bila Google mengirimkannya. Sekarang selalu ada karena URL auth
+        // memakai prompt=consent, tapi tanpa penjagaan ini satu perubahan parameter
+        // akan mengosongkan refresh token yang masih berlaku.
+        ...(tokens.refresh_token ? { refreshToken: encryptToken(tokens.refresh_token) } : {}),
       },
       create: {
         telegramId: BigInt(telegramId),
         googleEmail: payload.email!,
         googleSub: payload.sub!,
-        accessToken: tokens.access_token ?? null,
-        refreshToken: tokens.refresh_token ?? null,
+        accessToken: tokens.access_token ? encryptToken(tokens.access_token) : null,
+        refreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
+        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
       },
     });
 
@@ -155,36 +202,27 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
       `✅ Verifikasi Berhasil!\n\nHalo, ${payload.email}`
     );
 
-    // Auto-trigger schedule pairing flow
-    const nameFromEmail = extractNameFromEmail(payload.email!);
-    const matches = await findEmployeesByName(nameFromEmail);
+    // Tautkan ke data karyawan lewat email yang barusan diverifikasi. Kegagalan di sini
+    // tidak boleh menggagalkan login — user tinggal mengulang lewat /schedule.
+    try {
+      const employee = await pairUserByEmail(BigInt(telegramId), payload.email);
 
-    if (matches.length === 1) {
-      await bot.telegram.sendMessage(telegramId, `Apakah ini kamu?\n\n👤 ${matches[0].name}\n💼 ${matches[0].jobTitle}\n🆔 ${matches[0].employeeNik}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '✅ Ya, itu saya', callback_data: `pair:${matches[0].employeeNik}` }],
-            [{ text: '❌ Bukan saya', callback_data: 'pair:not_me' }],
-          ],
-        },
-      });
-    } else if (matches.length > 1) {
-      const buttons = matches.map((m) => [
-        { text: `${m.name} (${m.jobTitle})`, callback_data: `pair:${m.employeeNik}` },
-      ]);
-      buttons.push([{ text: '❌ Tidak ada yang cocok', callback_data: 'pair:not_me' }]);
-      await bot.telegram.sendMessage(telegramId, `Ditemukan ${matches.length} nama yang mirip. Pilih yang sesuai:`, {
-        reply_markup: { inline_keyboard: buttons },
-      });
-    } else {
-      await bot.telegram.sendMessage(telegramId, `❌ Nama "${nameFromEmail}" tidak ditemukan di jadwal.\n\nApakah kamu ingin mencari berdasarkan NIK?`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔍 Cari via NIK', callback_data: 'pair:ask_nik' }],
-            [{ text: '❌ Tidak', callback_data: 'pair:disable' }],
-          ],
-        },
-      });
+      if (employee) {
+        await bot.telegram.sendMessage(
+          telegramId,
+          `📇 Terhubung dengan data karyawan:\n\n👤 ${employee.name}\n💼 ${employee.jobTitle}\n🆔 ${employee.employeeNik}\n\nKirim /schedule untuk melihat jadwal WFO kamu.`
+        );
+      } else {
+        await bot.telegram.sendMessage(
+          telegramId,
+          `⚠️ Akun kamu sudah terverifikasi, tapi data karyawan dengan email ${payload.email} belum ditemukan.\n\nHubungi admin untuk melengkapi data kamu, lalu kirim /schedule lagi.`
+        );
+      }
+    } catch (err) {
+      console.error('Pairing karyawan gagal:', err);
+      await bot.telegram
+        .sendMessage(telegramId, '⚠️ Data jadwal sedang tidak bisa diakses. Kirim /schedule beberapa saat lagi.')
+        .catch((sendErr) => console.error('Gagal mengirim notifikasi pairing:', sendErr));
     }
 
     res.redirect(`${FRONTEND_URL}/success.html`);

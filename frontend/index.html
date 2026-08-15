@@ -42,10 +42,25 @@
   </div>
 
   <script>
-    const BACKEND_URL = 'https://wknd-tele-bot-emp.reyhandita.id';
+    // Halaman ini disajikan oleh backend yang sama, jadi tidak perlu di-hardcode
+    // dan otomatis benar di lokal maupun produksi.
+    const BACKEND_URL = window.location.origin;
     const tg = window.Telegram.WebApp;
     tg.ready();
     tg.expand();
+
+    // Backend mengembalikan alasan gagal lewat query param saat OAuth tidak selesai.
+    const ERROR_MESSAGES = {
+      domain: 'Gunakan akun Google perusahaan untuk verifikasi.',
+      cancelled: 'Verifikasi dibatalkan.',
+    };
+
+    const initialError = new URLSearchParams(window.location.search).get('error');
+    if (initialError) {
+      const errorBox = document.getElementById('error');
+      errorBox.textContent = ERROR_MESSAGES[initialError] || 'Verifikasi gagal. Silakan coba lagi.';
+      errorBox.style.display = 'block';
+    }
 
     async function startAuth() {
       const btn = document.getElementById('loginBtn');
