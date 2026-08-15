@@ -1,8 +1,8 @@
 import 'dotenv/config';
-import { Telegraf } from 'telegraf';
 import { prisma } from '../db';
+import { createBot } from '../lib/telegram';
 
-const bot = new Telegraf(process.env.BOT_TOKEN!);
+const bot = createBot(process.env.BOT_TOKEN!);
 
 async function checkTokens() {
   const users = await prisma.user.findMany({

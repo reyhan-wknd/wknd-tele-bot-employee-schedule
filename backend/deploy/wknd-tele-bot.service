@@ -1,0 +1,41 @@
+# Unit systemd tingkat user untuk backend bot.
+#
+# Pasang:
+#   mkdir -p ~/.config/systemd/user ~/wknd/projects/wknd-tele-bot-employee-schedule/backend/logs
+#   cp backend/deploy/wknd-tele-bot.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now wknd-tele-bot
+#
+# Supaya tetap jalan setelah logout / reboot:
+#   loginctl enable-linger $USER
+#
+# Sesuaikan ExecStart bila node tidak dipasang lewat nvm, dan PORT bila 3000 sudah terpakai.
+
+[Unit]
+Description=WKND Telegram bot absensi & jadwal WFO
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/wknd/projects/wknd-tele-bot-employee-schedule/backend
+Environment=NODE_ENV=production
+Environment=TZ=Asia/Jakarta
+Environment=PORT=3000
+# Host dual-stack tanpa rute IPv6 membuat panggilan ke Google/Telegram menggantung.
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first
+# npx dijalankan lewat shebang `env node`, sedangkan PATH systemd tidak memuat direktori
+# nvm — tanpa baris ini unit gagal dengan "env: 'node': No such file or directory".
+Environment=PATH=%h/.nvm/versions/node/v22.14.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.nvm/versions/node/v22.14.0/bin/npx tsx src/index.ts
+
+# Inti perbaikan BUG-09: proses yang mati karena sebab apa pun dihidupkan lagi.
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+
+StandardOutput=append:%h/wknd/projects/wknd-tele-bot-employee-schedule/backend/logs/backend.log
+StandardError=append:%h/wknd/projects/wknd-tele-bot-employee-schedule/backend/logs/backend.log
+
+[Install]
+WantedBy=default.target

@@ -25,7 +25,7 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 
 ### Jadwal WFO
 - `/schedule` — lihat jadwal WFO minggu ini + minggu depan (Minggu–Sabtu)
-- Auto-pairing user dengan data employee (via nama email atau NIK)
+- Auto-pairing user dengan data employee lewat email terverifikasi Google
 - Data di-sync dari Supabase setiap hari jam 20:00 WIB
 - Reminder WFO besok (Senin-Kamis jam 21:00)
 - Reminder jadwal minggu depan (Jumat jam 21:00)
@@ -113,6 +113,7 @@ Isi variabel berikut:
 | `JWT_SECRET` | Secret untuk sign state token |
 | `FRONTEND_URL` | URL HTTPS domain (sama dengan tunnel) |
 | `SUPABASE_KEY` | Supabase anon key untuk fetch jadwal |
+| `ALLOWED_EMAIL_DOMAINS` | Domain email yang boleh login, pisahkan koma (default: `weekendinc.com`) |
 
 ### 7. Install & Run
 
@@ -140,14 +141,18 @@ Backend sudah serve folder `frontend/` sebagai static files. Pastikan `BACKEND_U
 ### 9. Cron Jobs
 
 ```bash
-crontab -e
-# Paste isi dari backend/crontab.txt
+crontab backend/crontab.txt
 ```
 
 Pastikan folder `backend/logs/` sudah dibuat:
 ```bash
 mkdir -p backend/logs
 ```
+
+Jam di `crontab.txt` ditulis dalam WIB dan dikunci lewat `CRON_TZ=Asia/Jakarta`, jadi
+jadwalnya sama saja apakah mesin deploy berjalan di UTC atau WIB. Kode aplikasinya
+sendiri juga tidak bergantung pada TZ host — semua perhitungan waktu lewat
+`src/lib/time.ts`.
 
 #### Daftar Cron Jobs
 
@@ -177,16 +182,19 @@ mkdir -p backend/logs
 4. Backend return Google OAuth URL
 5. User login Google, consent
 6. Google redirect ke backend callback
-7. Backend simpan mapping telegram_id ↔ google_email
-8. Bot kirim pesan konfirmasi + auto-trigger schedule pairing
-9. Mini App auto-close
+7. Backend cek domain email — hanya `ALLOWED_EMAIL_DOMAINS` yang diterima
+8. Backend simpan mapping telegram_id ↔ google_email
+9. Bot kirim pesan konfirmasi + auto-pairing data karyawan
+10. Mini App auto-close
 
 ### Schedule Pairing
-1. Sistem baca nama dari email, cari di table schedules
-2. Jika ditemukan 1 → konfirmasi via button
-3. Jika ditemukan > 1 → pilih via button
-4. Jika tidak ditemukan → fallback cari via NIK
-5. Setelah paired, otomatis tampilkan jadwal WFO
+1. Backend mencari karyawan di tabel `employees` Supabase dengan email yang sama persis
+2. Ketemu → NIK-nya langsung disimpan, tanpa konfirmasi ke user
+3. Tidak ketemu → user diminta menghubungi admin; `/schedule` akan mencoba lagi
+
+Identitas ditentukan sepenuhnya oleh email yang tanda tangannya diverifikasi Google.
+User tidak pernah memilih atau mengetik NIK, sehingga tidak ada NIK yang bisa dipaksakan
+dari sisi klien.
 
 ## Project Structure
 
@@ -199,10 +207,15 @@ mkdir -p backend/logs
 │   ├── crontab.txt
 │   ├── prisma/
 │   │   └── schema.prisma
+│   ├── scripts/
+│   │   └── dump-db.sh            # Dump DB tanpa data tabel users
 │   └── src/
 │       ├── index.ts              # Express server entry
 │       ├── bot.ts                # Telegraf bot + commands
 │       ├── db.ts                 # Prisma client
+│       ├── config.ts             # Domain email yang diizinkan
+│       ├── lib/
+│       │   └── time.ts           # Semua perhitungan waktu WIB
 │       ├── routes/
 │       │   └── auth.ts           # OAuth endpoints
 │       ├── services/
