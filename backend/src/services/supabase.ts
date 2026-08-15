@@ -116,4 +116,3 @@ export async function fetchAllSchedules(): Promise<ScheduleRecord[]> {
   }));
 }
 
-export { getDateRange };

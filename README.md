@@ -139,7 +139,7 @@ nohup npx tsx src/index.ts > nohup.out 2>&1 &
 
 ### 8. Frontend
 
-Backend sudah serve folder `frontend/` sebagai static files. Pastikan `BACKEND_URL` di `frontend/index.html` sesuai dengan domain tunnel.
+Backend sudah serve folder `frontend/` sebagai static files, dan Mini App memanggil backend lewat `window.location.origin` — tidak ada URL yang perlu disesuaikan.
 
 ### 9. Cron Jobs
 
@@ -210,6 +210,8 @@ dari sisi klien.
 │   ├── crontab.txt
 │   ├── prisma/
 │   │   └── schema.prisma
+│   ├── deploy/
+│   │   └── wknd-tele-bot.service # Unit systemd (Restart=always)
 │   ├── scripts/
 │   │   └── dump-db.sh            # Dump DB tanpa data tabel users
 │   └── src/
@@ -218,13 +220,20 @@ dari sisi klien.
 │       ├── db.ts                 # Prisma client
 │       ├── config.ts             # Domain email yang diizinkan
 │       ├── lib/
-│       │   └── time.ts           # Semua perhitungan waktu WIB
+│       │   ├── crypto.ts         # Enkripsi token OAuth
+│       │   ├── schedule.ts       # Pengelompokan jadwal per tanggal
+│       │   ├── sync-guard.ts     # Penjaga kewarasan hasil sync
+│       │   ├── telegram.ts       # Klien Telegram + pengiriman massal
+│       │   ├── time.ts           # Semua perhitungan waktu WIB
+│       │   └── token.ts          # Masa berlaku access token
 │       ├── routes/
 │       │   └── auth.ts           # OAuth endpoints
 │       ├── services/
+│       │   ├── attendance.ts     # Aturan check-in/check-out
 │       │   ├── calendar.ts       # Google Calendar cuti detection
 │       │   ├── schedule.ts       # Schedule pairing logic
-│       │   └── supabase.ts       # Supabase data fetch
+│       │   ├── supabase.ts       # Supabase data fetch
+│       │   └── user.ts           # Hapus tautan akun + revoke token
 │       └── cron/
 │           ├── check-tokens.ts   # Token validity check
 │           ├── reminder.ts       # Attendance reminders

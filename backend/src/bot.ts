@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { Context } from 'telegraf';
 import type { Express } from 'express';
 import { prisma } from './db';
 import { isUserOnLeave } from './services/calendar';
@@ -29,7 +30,7 @@ export function errorMessage(err: unknown): string {
  * Telegram bisa menolak balasan karena alasan yang wajar — user memblokir bot, pesan
  * terlalu tua, rate limit. Itu tidak boleh menjadi rejection yang menjatuhkan proses.
  */
-async function reply(ctx: any, text: string, extra?: Record<string, unknown>): Promise<void> {
+async function reply(ctx: Context, text: string, extra?: Parameters<Context['reply']>[1]): Promise<void> {
   try {
     await ctx.reply(text, extra);
   } catch (err) {
@@ -54,6 +55,22 @@ bot.catch((err, ctx) => {
   void reply(ctx, '⚠️ Terjadi kesalahan di sisi server. Coba lagi beberapa saat.');
 });
 
+/**
+ * Gerbang yang sama dipakai lima perintah: pastikan user sudah menautkan akun Google,
+ * lalu kembalikan barisnya. Mengembalikan null berarti pemanggil cukup berhenti.
+ */
+async function requireUser(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await prisma.user.findUnique({ where: { telegramId } });
+
+  if (!user) {
+    await reply(ctx, '❌ Kamu belum terverifikasi. Gunakan /login terlebih dahulu.');
+    return null;
+  }
+
+  return { telegramId, user };
+}
+
 // --- Schedule Pairing ---
 
 /**
@@ -61,7 +78,7 @@ bot.catch((err, ctx) => {
  * diverifikasi Google — identitas tidak pernah ditanyakan ke user, jadi tidak ada NIK
  * yang bisa dipaksakan dari sisi klien.
  */
-async function resolveEmployeeNik(ctx: any, telegramId: bigint, googleEmail: string): Promise<string | null> {
+async function resolveEmployeeNik(ctx: Context, telegramId: bigint, googleEmail: string): Promise<string | null> {
   const pairing = await getUserPairing(telegramId);
   if (pairing) return pairing.employeeNik;
 
@@ -89,7 +106,7 @@ async function resolveEmployeeNik(ctx: any, telegramId: bigint, googleEmail: str
 
 // --- Schedule Display ---
 
-async function showSchedule(ctx: any, telegramId: bigint, googleEmail: string) {
+async function showSchedule(ctx: Context, telegramId: bigint, googleEmail: string) {
   const employeeNik = await resolveEmployeeNik(ctx, telegramId, googleEmail);
   if (!employeeNik) return;
 
@@ -112,10 +129,8 @@ async function showSchedule(ctx: any, telegramId: bigint, googleEmail: string) {
 
   let msg = '📅 Jadwal WFO kamu:\n';
 
-  // Today's status
-  const todaySchedule = await prisma.schedule.findMany({
-    where: { employeeNik, date: today },
-  });
+  // Jadwal hari ini sudah termuat di hasil query di atas (gte today), jadi cukup disaring.
+  const todaySchedule = schedules.filter((s) => s.date.getTime() === today.getTime());
   // Data jadwal didahulukan: ada kalanya proyek menjadwalkan WFO di akhir pekan, dan
   // dulu hari itu tetap tertulis "Day Off" karena harinya diperiksa lebih dulu.
   let todayStatus: string;
@@ -182,25 +197,17 @@ bot.command('login', async (ctx) => {
 });
 
 bot.command('schedule', async (ctx) => {
-  const telegramId = BigInt(ctx.from.id);
-
-  const user = await prisma.user.findUnique({ where: { telegramId } });
-  if (!user) {
-    await reply(ctx, '❌ Kamu belum terverifikasi. Gunakan /login terlebih dahulu.');
-    return;
-  }
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+  const { telegramId, user } = sesi;
 
   await showSchedule(ctx, telegramId, user.googleEmail);
 });
 
 bot.command('check_in', async (ctx) => {
-  const telegramId = BigInt(ctx.from.id);
-
-  const user = await prisma.user.findUnique({ where: { telegramId } });
-  if (!user) {
-    await reply(ctx, '❌ Kamu belum terverifikasi. Gunakan /login terlebih dahulu.');
-    return;
-  }
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+  const { telegramId, user } = sesi;
 
   const today = todayWIB();
 
@@ -215,7 +222,7 @@ bot.command('check_in', async (ctx) => {
     return;
   }
 
-  const onLeave = await isUserOnLeave(telegramId);
+  const onLeave = await isUserOnLeave(user);
   if (onLeave) {
     await reply(ctx, '❌ Kamu sedang cuti hari ini. Tidak perlu check-in.');
     return;
@@ -238,13 +245,9 @@ bot.command('check_in', async (ctx) => {
 });
 
 bot.command('check_out', async (ctx) => {
-  const telegramId = BigInt(ctx.from.id);
-
-  const user = await prisma.user.findUnique({ where: { telegramId } });
-  if (!user) {
-    await reply(ctx, '❌ Kamu belum terverifikasi. Gunakan /login terlebih dahulu.');
-    return;
-  }
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+  const { telegramId, user } = sesi;
 
   const today = todayWIB();
   const kemarin = addDays(today, -1);
@@ -301,13 +304,9 @@ bot.command('check_out', async (ctx) => {
 });
 
 bot.command('status', async (ctx) => {
-  const telegramId = BigInt(ctx.from.id);
-  const user = await prisma.user.findUnique({ where: { telegramId } });
-
-  if (!user) {
-    await reply(ctx, '❌ Belum terverifikasi. Gunakan /login untuk menghubungkan akun Google.');
-    return;
-  }
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+  const { telegramId, user } = sesi;
 
   const today = todayWIB();
   const attendance = await prisma.attendance.findUnique({
@@ -332,13 +331,9 @@ bot.command('status', async (ctx) => {
 });
 
 bot.command('logout', async (ctx) => {
-  const telegramId = BigInt(ctx.from.id);
-  const user = await prisma.user.findUnique({ where: { telegramId } });
-
-  if (!user) {
-    await reply(ctx, 'Kamu belum menghubungkan akun Google.');
-    return;
-  }
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+  const { telegramId, user } = sesi;
 
   await unlinkUser(telegramId);
   await reply(ctx, `🔓 Akun Google (${user.googleEmail}) berhasil di-unlink.`);

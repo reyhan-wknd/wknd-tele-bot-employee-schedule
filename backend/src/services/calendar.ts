@@ -33,9 +33,16 @@ function createOAuth2Client(accessToken: string, refreshToken: string | null): O
   return client;
 }
 
-export async function isUserOnLeave(telegramId: bigint, instant: Date = new Date()): Promise<boolean> {
-  const user = await prisma.user.findUnique({ where: { telegramId } });
-  if (!user || !user.accessToken) return false;
+export interface UserToken {
+  telegramId: bigint;
+  accessToken: string | null;
+  refreshToken: string | null;
+}
+
+/** Menerima baris user langsung: pemanggilnya selalu sudah memegangnya. */
+export async function isUserOnLeave(user: UserToken, instant: Date = new Date()): Promise<boolean> {
+  if (!user.accessToken) return false;
+  const telegramId = user.telegramId;
 
   const client = createOAuth2Client(decryptToken(user.accessToken)!, decryptToken(user.refreshToken));
 

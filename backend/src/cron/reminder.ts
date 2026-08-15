@@ -23,7 +23,7 @@ async function sendCheckInReminders() {
   const pesan: PesanMassal[] = [];
   for (const user of users) {
     if (sudahAbsen.has(user.telegramId.toString())) continue;
-    if (await isUserOnLeave(user.telegramId)) continue;
+    if (await isUserOnLeave(user)) continue;
 
     pesan.push({
       telegramId: user.telegramId,

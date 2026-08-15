@@ -42,7 +42,9 @@
   </div>
 
   <script>
-    const BACKEND_URL = 'https://wknd-tele-bot-emp.reyhandita.id';
+    // Halaman ini disajikan oleh backend yang sama, jadi tidak perlu di-hardcode
+    // dan otomatis benar di lokal maupun produksi.
+    const BACKEND_URL = window.location.origin;
     const tg = window.Telegram.WebApp;
     tg.ready();
     tg.expand();
