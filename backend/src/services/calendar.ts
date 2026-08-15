@@ -11,7 +11,7 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
  * Dicocokkan dengan batas kata, bukan substring. Kata `off` sendirian sengaja tidak ada:
  * dulu ia membuat "Ke office pagi", "Coffee chat", dan "Kickoff project" terbaca sebagai cuti.
  */
-const LEAVE_TITLE_PATTERN = /\b(cuti|izin|leave|day[\s-]?off|off[\s-]?day|pto|ooo)\b/i;
+const LEAVE_TITLE_PATTERN = /\b(cuti|izin|leave|day[\s-]?off|off[\s-]?day|out[\s-]?of[\s-]?office|pto|ooo)\b/i;
 
 export interface CalendarEventLike {
   eventType?: string | null;

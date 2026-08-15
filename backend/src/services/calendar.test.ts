@@ -8,7 +8,17 @@ describe('isLeaveEvent', () => {
   });
 
   test('judul yang menyebut cuti secara utuh', () => {
-    for (const judul of ['Cuti tahunan', 'Annual Leave', 'Day off', 'day-off', 'Izin sakit', 'PTO', 'OOO']) {
+    for (const judul of [
+      'Cuti tahunan',
+      'Annual Leave',
+      'Day off',
+      'day-off',
+      'Izin sakit',
+      'PTO',
+      'OOO',
+      'Out of office',
+      'out-of-office hari ini',
+    ]) {
       expect(isLeaveEvent({ summary: judul }), judul).toBe(true);
     }
   });
@@ -24,6 +34,13 @@ describe('isLeaveEvent', () => {
     ]) {
       expect(isLeaveEvent({ summary: judul }), judul).toBe(false);
     }
+  });
+
+  test('judul "Out of office" tertangkap tanpa bergantung eventType', () => {
+    // Event OOO khusus tidak tersedia di semua jenis akun, jadi banyak orang membuat
+    // event biasa dengan judul itu.
+    expect(isLeaveEvent({ summary: 'Out of office' })).toBe(true);
+    expect(isLeaveEvent({ summary: 'Out of office', eventType: 'default' })).toBe(true);
   });
 
   test('event biasa tanpa judul relevan', () => {
