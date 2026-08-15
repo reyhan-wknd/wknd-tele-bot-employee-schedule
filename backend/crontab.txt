@@ -12,8 +12,16 @@
 CRON_TZ=Asia/Jakarta
 TZ=Asia/Jakarta
 
+# PATH bawaan cron hanya /usr/bin:/bin, sedangkan npx dipasang lewat nvm — tanpa baris
+# ini semua job gagal diam-diam dengan "npx: command not found". Sesuaikan versinya.
+PATH=/home/reyhanr/.nvm/versions/node/v22.14.0/bin:/usr/local/bin:/usr/bin:/bin
+NODE_OPTIONS=--dns-result-order=ipv4first
+
+# Keduanya harus absolut. Cron tidak mengembangkan variabel di dalam assignment, dan
+# shell tidak mengembangkan hasil ekspansi untuk kedua kalinya — dengan `LOG=$PROJECT/logs`
+# redirect-nya gagal dan perintahnya tidak pernah dijalankan sama sekali.
 PROJECT=/home/reyhanr/wknd/projects/wknd-tele-bot-employee-schedule/backend
-LOG=$PROJECT/logs
+LOG=/home/reyhanr/wknd/projects/wknd-tele-bot-employee-schedule/backend/logs
 
 # Sync jadwal dari Supabase — 20:00 WIB, setiap hari
 0 20 * * * cd $PROJECT && npx tsx src/cron/sync-schedules.ts >> $LOG/sync-schedules.log 2>&1
