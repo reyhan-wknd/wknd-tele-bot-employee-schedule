@@ -7,6 +7,7 @@ import { prisma } from '../db';
 import { bot } from '../bot';
 import { ALLOWED_EMAIL_DOMAINS, isAllowedEmail } from '../config';
 import { pairUserByEmail } from '../services/schedule';
+import { unlinkUser } from '../services/user';
 
 export const authRouter = Router();
 
@@ -17,7 +18,11 @@ const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI!;
 const FRONTEND_URL = process.env.FRONTEND_URL!;
 
-const oauth2Client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+/** Dibuat per permintaan: instance modul-level dimutasi setCredentials, dan dua login
+ *  yang berjalan bersamaan akan saling menimpa kredensial pada objek yang sama. */
+function createOAuthClient(): OAuth2Client {
+  return new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
+}
 
 // Rate limiting: 10 requests per minute per IP
 const authLimiter = rateLimit({
@@ -129,6 +134,7 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
 
   // Exchange code for tokens
   try {
+    const oauth2Client = createOAuthClient();
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
@@ -155,6 +161,17 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
         .catch((err) => console.error('Gagal mengirim notifikasi penolakan domain:', err));
       res.redirect(`${FRONTEND_URL}/index.html?error=domain`);
       return;
+    }
+
+    // Akun Google ini mungkin masih tertaut ke Telegram lama (ganti HP/akun). Pemilik
+    // email sudah membuktikan kepemilikannya lewat OAuth, jadi tautan lama dipindahkan
+    // — kalau tidak, upsert menabrak unique constraint dan user cuma melihat 500.
+    const tautanLama = await prisma.user.findFirst({
+      where: { googleEmail: payload.email, telegramId: { not: BigInt(telegramId) } },
+    });
+    if (tautanLama) {
+      console.log(`Memindahkan tautan ${payload.email} dari ${tautanLama.telegramId} ke ${telegramId}`);
+      await unlinkUser(tautanLama.telegramId);
     }
 
     await prisma.user.upsert({

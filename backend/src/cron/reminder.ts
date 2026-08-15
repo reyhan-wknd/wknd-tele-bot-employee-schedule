@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { prisma } from '../db';
-import { createBot } from '../lib/telegram';
+import { createBot, kirimMassal, type PesanMassal } from '../lib/telegram';
 import { isUserOnLeave } from '../services/calendar';
 import { todayWIB, weekdayOf } from '../lib/time';
 
@@ -9,48 +9,53 @@ const bot = createBot(process.env.BOT_TOKEN!);
 async function sendCheckInReminders() {
   const today = todayWIB();
   const weekday = weekdayOf(today);
-  if (weekday === 0 || weekday === 6) return; // Skip weekends
-
-  // Find all verified users
-  const users = await prisma.user.findMany();
-
-  for (const user of users) {
-    // Check if already checked in
-    const attendance = await prisma.attendance.findUnique({
-      where: { telegramId_date: { telegramId: user.telegramId, date: today } },
-    });
-    if (attendance) continue;
-
-    const onLeave = await isUserOnLeave(user.telegramId);
-    if (onLeave) continue;
-
-    await bot.telegram.sendMessage(
-      Number(user.telegramId),
-      '⏰ Reminder: Kamu belum check-in hari ini. Gunakan /check_in untuk absen masuk.'
-    ).catch((err) => console.error(`Failed to send check-in reminder to ${user.telegramId}:`, err.message));
+  if (weekday === 0 || weekday === 6) {
+    console.log('Reminder check-in: akhir pekan, dilewati');
+    return;
   }
+
+  const users = await prisma.user.findMany();
+  const sudahAbsen = new Set(
+    (await prisma.attendance.findMany({ where: { date: today }, select: { telegramId: true } }))
+      .map((a) => a.telegramId.toString())
+  );
+
+  const pesan: PesanMassal[] = [];
+  for (const user of users) {
+    if (sudahAbsen.has(user.telegramId.toString())) continue;
+    if (await isUserOnLeave(user.telegramId)) continue;
+
+    pesan.push({
+      telegramId: user.telegramId,
+      text: '⏰ Reminder: Kamu belum check-in hari ini. Gunakan /check_in untuk absen masuk.',
+    });
+  }
+
+  const hasil = await kirimMassal(bot, pesan);
+  console.log(`Reminder check-in: ${users.length} user diperiksa, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
 }
 
 async function sendCheckOutReminders() {
   const today = todayWIB();
-  if (weekdayOf(today) === 0 || weekdayOf(today) === 6) return;
+  if (weekdayOf(today) === 0 || weekdayOf(today) === 6) {
+    console.log('Reminder check-out: akhir pekan, dilewati');
+    return;
+  }
 
-  // Find users who checked in but haven't checked out
   const attendances = await prisma.attendance.findMany({
     where: { date: today, checkOut: null },
   });
 
   const realNow = new Date();
+  const pesan: PesanMassal[] = attendances
+    .filter((att) => (realNow.getTime() - att.checkIn.getTime()) / (1000 * 60 * 60) >= 8)
+    .map((att) => ({
+      telegramId: att.telegramId,
+      text: '⏰ Reminder: Kamu belum check-out hari ini. Gunakan /check_out untuk absen pulang.',
+    }));
 
-  for (const att of attendances) {
-    const diffHours = (realNow.getTime() - att.checkIn.getTime()) / (1000 * 60 * 60);
-    if (diffHours < 8) continue; // Not yet 8 hours
-
-    await bot.telegram.sendMessage(
-      Number(att.telegramId),
-      '⏰ Reminder: Kamu belum check-out hari ini. Gunakan /check_out untuk absen pulang.'
-    ).catch((err) => console.error(`Failed to send check-out reminder to ${att.telegramId}:`, err.message));
-  }
+  const hasil = await kirimMassal(bot, pesan);
+  console.log(`Reminder check-out: ${attendances.length} absensi terbuka, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
 }
 
 async function main() {

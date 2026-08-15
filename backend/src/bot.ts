@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type { Express } from 'express';
 import { prisma } from './db';
 import { isUserOnLeave } from './services/calendar';
@@ -34,6 +35,16 @@ async function reply(ctx: any, text: string, extra?: Record<string, unknown>): P
     console.error(`Gagal mengirim balasan ke ${ctx.from?.id}:`, errorMessage(err));
   }
 }
+
+// Semua perintah bersifat pribadi — email, jadwal, dan absensi tidak boleh tampil di
+// grup hanya karena bot ikut ditambahkan ke sana.
+bot.use(async (ctx, next) => {
+  if (ctx.chat && ctx.chat.type !== 'private') {
+    await reply(ctx, '🔒 Perintah bot ini hanya bisa dipakai di chat pribadi. Silakan DM saya.');
+    return;
+  }
+  return next();
+});
 
 // Jaring terakhir: error apa pun di dalam handler ditangkap di sini, bukan dilempar
 // ke event loop sebagai unhandled rejection.
@@ -233,21 +244,35 @@ bot.command('check_out', async (ctx) => {
   }
 
   const today = todayWIB();
+  const kemarin = addDays(today, -1);
 
-  const attendance = await prisma.attendance.findUnique({
+  const hariIni = await prisma.attendance.findUnique({
     where: { telegramId_date: { telegramId, date: today } },
   });
+
+  if (hariIni?.checkOut) {
+    await reply(ctx, `❌ Kamu sudah check-out hari ini (${formatTimeWIB(hariIni.checkOut)}).`);
+    return;
+  }
+
+  // Absensi kemarin yang belum ditutup masih boleh diselesaikan lewat tengah malam —
+  // dulu tanggalnya sudah berganti dan barisnya tertinggal terbuka selamanya.
+  const attendance =
+    hariIni ??
+    (await prisma.attendance.findFirst({
+      where: { telegramId, date: kemarin, checkOut: null },
+    }));
+
   if (!attendance) {
     await reply(ctx, '❌ Kamu belum check-in hari ini. Gunakan /check_in terlebih dahulu.');
     return;
   }
 
-  if (attendance.checkOut) {
-    await reply(ctx, `❌ Kamu sudah check-out hari ini (${formatTimeWIB(attendance.checkOut)}).`);
-    return;
-  }
+  const lanjutanKemarin = attendance.date.getTime() !== today.getTime();
 
-  if (hourWIB() < 18) {
+  // Batas jam 18:00 hanya berlaku untuk shift hari ini; yang lewat tengah malam sudah
+  // jelas melewatinya, dan tetap dijaga aturan minimal 8 jam di bawah.
+  if (!lanjutanKemarin && hourWIB() < 18) {
     await reply(ctx, '❌ Check-out hanya bisa dilakukan mulai jam 18:00 WIB.');
     return;
   }
@@ -268,7 +293,11 @@ bot.command('check_out', async (ctx) => {
   const durationHours = Math.floor(diffHours);
   const durationMins = Math.round((diffHours - durationHours) * 60);
 
-  await reply(ctx, `✅ Check-out berhasil!\n\n🕐 ${formatTimeWIB(realNow)}\n⏱️ Durasi kerja: ${durationHours}j ${durationMins}m`);
+  const keterangan = lanjutanKemarin ? `\n📅 Untuk absensi ${formatDateOnly(attendance.date)}` : '';
+  await reply(
+    ctx,
+    `✅ Check-out berhasil!\n\n🕐 ${formatTimeWIB(realNow)}\n⏱️ Durasi kerja: ${durationHours}j ${durationMins}m${keterangan}`
+  );
 });
 
 bot.command('status', async (ctx) => {
@@ -319,15 +348,23 @@ export async function launchBot(app?: Express) {
   const mode = process.env.BOT_MODE || 'polling';
 
   if (mode === 'webhook') {
-    const webhookPath = `/webhook/${BOT_TOKEN}`;
+    // Path tidak lagi memuat BOT_TOKEN: dulu token itu ikut tercetak ke log setiap
+    // start. Diturunkan dari token supaya tetap stabil tanpa env baru.
+    const turunan = (label: string, panjang: number) =>
+      crypto.createHmac('sha256', BOT_TOKEN).update(label).digest('hex').slice(0, panjang);
+
+    const webhookPath = `/webhook/${turunan('webhook-path-v1', 32)}`;
+    const secretToken = turunan('webhook-secret-token-v1', 64);
     const webhookUrl = `${process.env.WEBHOOK_DOMAIN}${webhookPath}`;
 
-    app?.use(bot.webhookCallback(webhookPath));
+    // secretToken membuat Telegram mengirim header rahasia di tiap update, jadi
+    // kerahasiaan URL bukan lagi satu-satunya penjaga.
+    app?.use(bot.webhookCallback(webhookPath, { secretToken }));
 
     // Kegagalan mendaftarkan webhook tidak boleh menjatuhkan server yang sudah listen —
     // pernah terjadi: satu ETIMEDOUT ke api.telegram.org mematikan seluruh proses.
     try {
-      await bot.telegram.setWebhook(webhookUrl);
+      await bot.telegram.setWebhook(webhookUrl, { secret_token: secretToken });
       console.log('Bot berjalan mode webhook, registrasi berhasil');
     } catch (err) {
       console.error('Gagal mendaftarkan webhook, server tetap jalan:', errorMessage(err));
