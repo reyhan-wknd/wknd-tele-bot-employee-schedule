@@ -47,6 +47,19 @@
     tg.ready();
     tg.expand();
 
+    // Backend mengembalikan alasan gagal lewat query param saat OAuth tidak selesai.
+    const ERROR_MESSAGES = {
+      domain: 'Gunakan akun Google perusahaan untuk verifikasi.',
+      cancelled: 'Verifikasi dibatalkan.',
+    };
+
+    const initialError = new URLSearchParams(window.location.search).get('error');
+    if (initialError) {
+      const errorBox = document.getElementById('error');
+      errorBox.textContent = ERROR_MESSAGES[initialError] || 'Verifikasi gagal. Silakan coba lagi.';
+      errorBox.style.display = 'block';
+    }
+
     async function startAuth() {
       const btn = document.getElementById('loginBtn');
       const loading = document.getElementById('loading');
