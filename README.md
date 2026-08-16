@@ -25,6 +25,15 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - Satu event Out of office membuat hari itu terhitung cuti penuh, berapa pun durasinya
 - Reminder check-in (09:30, 09:50) dan check-out (18:00, 21:00, 23:00)
 
+### Hari Libur
+- `/holiday` — daftar hari libur 365 hari ke depan
+- `/manage_holiday add|edit|remove <tanggal> [label]` — khusus admin (`ADMIN_TELEGRAM_IDS`)
+- Dua bentuk tanggal: `0817` berulang tiap tahun, `20260321` berlaku sekali saja —
+  mayoritas libur nasional (Idul Fitri, Nyepi, Waisak, Imlek) bergeser tiap tahun
+- Di hari libur, reminder check-in/check-out berhenti; `/check_in` tetap boleh tapi
+  meminta konfirmasi lewat tombol dulu
+- Isi awal diambil dari kalender hari libur Indonesia milik Google, lalu dikoreksi manual
+
 ### Jadwal WFO
 - `/schedule` — lihat jadwal WFO minggu ini + minggu depan (Minggu–Sabtu)
 - Auto-pairing user dengan data employee lewat email terverifikasi Google
@@ -134,6 +143,7 @@ Isi variabel berikut:
 | `ALLOWED_EMAIL_DOMAINS` | Domain email yang boleh login, pisahkan koma (default: `weekendinc.com`) |
 | `TOKEN_ENCRYPTION_KEY` | Kunci enkripsi token OAuth di database, 32 byte base64 (wajib) |
 | `AUTH_RATE_LIMIT` | Batas permintaan /auth per menit per IP (default: 10) |
+| `ADMIN_TELEGRAM_IDS` | Telegram ID yang boleh `/manage_holiday`, pisahkan koma. Kosong = tidak ada admin |
 
 ### 7. Install & Run (development)
 
@@ -230,6 +240,23 @@ MySQL tidak membuka port host sama sekali.
 
 `docker compose` menjalankan `prisma migrate deploy` otomatis setiap container backend
 start, jadi migrasi tidak perlu dijalankan terpisah.
+
+### Seed hari libur (sekali tiap tahun)
+
+Kalender Google hanya memuat sekitar satu tahun ke depan, jadi jalankan lagi tiap awal tahun:
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend \
+  npx tsx src/scripts/seed-holidays.ts 2027
+```
+
+Idempoten — entri yang sudah ada hanya diperbarui labelnya. Hasilnya **usulan, bukan
+kebenaran akhir**: skrip membuang penanda yang bukan hari libur (`1 Ramadan`, `Hari Paskah`,
+`Malam Tahun Baru`) dan menyorot entri yang masih ditandai `(belum pasti)` oleh Google.
+Tinjau keluarannya, lalu koreksi lewat `/manage_holiday` — cuti bersama baru pasti setelah
+SKB 3 Menteri terbit.
+
+Kalau `/holiday` terlihat menipis, itu tandanya seed tahun berikutnya belum dijalankan.
 
 ## Bot Modes
 

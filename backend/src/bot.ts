@@ -10,12 +10,23 @@ import {
   formatDateOnly,
   formatTimeWIB,
   hourWIB,
+  isoDateOf,
   todayWIB,
   weekdayOf,
 } from './lib/time';
 import { formatProjects, groupSchedulesByDate } from './lib/schedule';
 import { bolehCheckin, bolehCheckout, durasiKerja, selisihJam } from './services/attendance';
 import { createBot } from './lib/telegram';
+import { ADMIN_TELEGRAM_IDS, isAdmin } from './config';
+import { parsePerintahKelola, TAHUN_BERULANG } from './lib/holiday';
+import {
+  cariLibur,
+  daftarUpcoming,
+  hapusLibur,
+  labelLibur,
+  tambahLibur,
+  ubahLabelLibur,
+} from './services/holiday';
 
 const BOT_TOKEN = process.env.BOT_TOKEN!;
 const FRONTEND_URL = process.env.FRONTEND_URL!;
@@ -204,6 +215,36 @@ bot.command('schedule', async (ctx) => {
   await showSchedule(ctx, telegramId, user.googleEmail);
 });
 
+/**
+ * Bagian check-in setelah semua gerbang waktu lolos. Dipisah karena dipakai dua jalur:
+ * langsung dari /check_in, dan dari tombol konfirmasi saat hari itu terdaftar libur.
+ */
+async function lakukanCheckin(
+  ctx: Context,
+  telegramId: bigint,
+  user: { accessToken: string | null; refreshToken: string | null }
+): Promise<string> {
+  const today = todayWIB();
+
+  if (await isUserOnLeave({ telegramId, ...user })) {
+    return '❌ Kamu sedang cuti hari ini. Tidak perlu check-in.';
+  }
+
+  const existing = await prisma.attendance.findUnique({
+    where: { telegramId_date: { telegramId, date: today } },
+  });
+  if (existing) {
+    return `❌ Kamu sudah check-in hari ini (${formatTimeWIB(existing.checkIn)}).`;
+  }
+
+  const realNow = new Date();
+  await prisma.attendance.create({
+    data: { telegramId, date: today, checkIn: realNow },
+  });
+
+  return `✅ Check-in berhasil!\n\n🕐 ${formatTimeWIB(realNow)}`;
+}
+
 bot.command('check_in', async (ctx) => {
   const sesi = await requireUser(ctx);
   if (!sesi) return;
@@ -222,26 +263,61 @@ bot.command('check_in', async (ctx) => {
     return;
   }
 
-  const onLeave = await isUserOnLeave(user);
-  if (onLeave) {
-    await reply(ctx, '❌ Kamu sedang cuti hari ini. Tidak perlu check-in.');
+  // Hari libur tidak menutup check-in — sebagian orang memang masuk. Tapi jangan sampai
+  // tercatat karena salah pencet, jadi minta konfirmasi dulu.
+  const libur = await labelLibur(today);
+  if (libur) {
+    await reply(ctx, `📅 Hari ini terdaftar libur: *${libur}*.\n\nTetap mau check-in?`, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Ya, tetap check-in', callback_data: `ci:ok:${isoDateOf(today)}` },
+            { text: '❌ Batal', callback_data: `ci:batal:${isoDateOf(today)}` },
+          ],
+        ],
+      },
+    });
     return;
   }
 
-  const existing = await prisma.attendance.findUnique({
-    where: { telegramId_date: { telegramId, date: today } },
-  });
-  if (existing) {
-    await reply(ctx, `❌ Kamu sudah check-in hari ini (${formatTimeWIB(existing.checkIn)}).`);
+  await reply(ctx, await lakukanCheckin(ctx, telegramId, user));
+});
+
+/**
+ * Tombol konfirmasi check-in di hari libur.
+ *
+ * Tanggalnya ikut dibawa di callback_data dan dicocokkan ulang: tombol kemarin yang
+ * di-scroll lagi hari ini tidak boleh mencatat absensi untuk hari yang salah.
+ */
+bot.action(/^ci:(ok|batal):(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => undefined);
+
+  const [, pilihan, tanggal] = ctx.match;
+  const hariIni = isoDateOf(todayWIB());
+
+  const selesai = async (teks: string) => {
+    try {
+      await ctx.editMessageText(teks);
+    } catch {
+      await reply(ctx, teks);
+    }
+  };
+
+  if (tanggal !== hariIni) {
+    await selesai('⌛ Tombol ini sudah kedaluwarsa karena harinya sudah berganti. Kirim /check_in lagi.');
     return;
   }
 
-  const realNow = new Date();
-  await prisma.attendance.create({
-    data: { telegramId, date: today, checkIn: realNow },
-  });
+  if (pilihan === 'batal') {
+    await selesai('👍 Check-in dibatalkan. Selamat berlibur!');
+    return;
+  }
 
-  await reply(ctx, `✅ Check-in berhasil!\n\n🕐 ${formatTimeWIB(realNow)}`);
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+
+  await selesai(await lakukanCheckin(ctx, sesi.telegramId, sesi.user));
 });
 
 bot.command('check_out', async (ctx) => {
@@ -339,26 +415,117 @@ bot.command('logout', async (ctx) => {
   await reply(ctx, `🔓 Akun Google (${user.googleEmail}) berhasil di-unlink.`);
 });
 
-/** Daftar perintah yang muncul di menu Telegram. */
+// --- Hari Libur ---
+
+bot.command('holiday', async (ctx) => {
+  const daftar = await daftarUpcoming();
+
+  if (daftar.length === 0) {
+    await reply(
+      ctx,
+      '📅 Belum ada hari libur terdaftar untuk 365 hari ke depan.\n\nHubungi admin untuk mengisinya.'
+    );
+    return;
+  }
+
+  let msg = '📅 Hari libur 365 hari ke depan:\n\n';
+  for (const libur of daftar) {
+    msg += `  • ${formatDateOnly(libur.tanggal)} — ${libur.label}${libur.berulang ? ' 🔁' : ''}\n`;
+  }
+  msg += '\n🔁 = berulang tiap tahun';
+
+  await reply(ctx, msg);
+});
+
+/**
+ * Hanya admin. Menyembunyikan perintah ini dari menu Telegram sifatnya kosmetik —
+ * siapa pun tetap bisa mengetiknya — jadi pemeriksaan di sini yang menahan sungguhan.
+ */
+bot.command('manage_holiday', async (ctx) => {
+  if (!isAdmin(ctx.from.id)) {
+    await reply(ctx, '❌ Perintah ini hanya untuk admin.');
+    return;
+  }
+
+  const sisa = ctx.message.text.replace(/^\/manage_holiday(@\S+)?/, '');
+  const perintah = parsePerintahKelola(sisa);
+  if (!perintah.ok) {
+    await reply(ctx, `❌ ${perintah.pesan}`);
+    return;
+  }
+
+  const { aksi, tanggal, label } = perintah.nilai;
+  const berulang = tanggal.year === TAHUN_BERULANG;
+  const tampilTanggal = berulang
+    ? `${String(tanggal.day).padStart(2, '0')}-${String(tanggal.month).padStart(2, '0')} (tiap tahun)`
+    : `${String(tanggal.day).padStart(2, '0')}-${String(tanggal.month).padStart(2, '0')}-${tanggal.year}`;
+
+  const sudahAda = await cariLibur(tanggal);
+
+  if (aksi === 'add') {
+    if (sudahAda) {
+      await reply(ctx, `❌ ${tampilTanggal} sudah terdaftar sebagai "${sudahAda.label}".\n\nPakai edit untuk mengubah labelnya.`);
+      return;
+    }
+    await tambahLibur(tanggal, label);
+    await reply(ctx, `✅ Ditambahkan: ${tampilTanggal} — ${label}`);
+    return;
+  }
+
+  if (!sudahAda) {
+    await reply(ctx, `❌ ${tampilTanggal} belum terdaftar sebagai hari libur.`);
+    return;
+  }
+
+  if (aksi === 'edit') {
+    await ubahLabelLibur(tanggal, label);
+    await reply(ctx, `✅ Diubah: ${tampilTanggal}\n\n"${sudahAda.label}" → "${label}"`);
+    return;
+  }
+
+  await hapusLibur(tanggal);
+  await reply(ctx, `🗑️ Dihapus: ${tampilTanggal} — ${sudahAda.label}`);
+});
+
+/** Daftar perintah yang muncul di menu Telegram untuk semua orang. */
 const BOT_COMMANDS = [
   { command: 'start', description: 'Lihat daftar perintah' },
   { command: 'login', description: 'Hubungkan akun Google' },
   { command: 'logout', description: 'Hapus koneksi akun Google' },
   { command: 'status', description: 'Cek status verifikasi & absensi hari ini' },
   { command: 'schedule', description: 'Lihat jadwal WFO minggu ini & minggu depan' },
+  { command: 'holiday', description: 'Lihat hari libur 365 hari ke depan' },
   { command: 'check_in', description: 'Absen masuk (min. 08:00 WIB)' },
   { command: 'check_out', description: 'Absen pulang (min. 18:00 WIB)' },
 ];
+
+/** Menu admin: sama seperti di atas, ditambah pengelolaan hari libur. */
+const ADMIN_COMMANDS = [
+  ...BOT_COMMANDS,
+  { command: 'manage_holiday', description: 'Kelola hari libur (admin)' },
+];
+
+/**
+ * Menu per-admin dipasang dengan scope chat, jadi /manage_holiday tidak muncul di menu
+ * user biasa. Ini semata kerapian tampilan — gerbang sesungguhnya ada di handler.
+ */
+async function daftarkanMenuPerintah() {
+  await bot.telegram
+    .setMyCommands(BOT_COMMANDS)
+    .catch((err) => console.error('Gagal mendaftarkan daftar perintah:', errorMessage(err)));
+
+  for (const adminId of ADMIN_TELEGRAM_IDS) {
+    await bot.telegram
+      .setMyCommands(ADMIN_COMMANDS, { scope: { type: 'chat', chat_id: Number(adminId) } })
+      .catch((err) => console.error(`Gagal mendaftarkan menu admin untuk ${adminId}:`, errorMessage(err)));
+  }
+}
 
 export async function launchBot(app?: Express) {
   const mode = process.env.BOT_MODE || 'polling';
 
   // Gagal mendaftarkan menu perintah tidak boleh menghentikan startup.
-  await bot.telegram
-    .setMyCommands(BOT_COMMANDS)
-    .catch((err) => console.error('Gagal mendaftarkan daftar perintah:', errorMessage(err)));
-
-  bot.telegram.setMyCommands(BOT_COMMANDS);
+  await daftarkanMenuPerintah();
 
   if (mode === 'webhook') {
     // Path tidak lagi memuat BOT_TOKEN: dulu token itu ikut tercetak ke log setiap

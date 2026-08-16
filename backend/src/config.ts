@@ -30,3 +30,25 @@ if (ALLOWED_EMAIL_DOMAINS.length === 0) {
 export function isAllowedEmail(email: string): boolean {
   return matchesEmailDomain(email, ALLOWED_EMAIL_DOMAINS);
 }
+
+/** Ubah "123, 456" menjadi [123n, 456n]. Entri non-angka diabaikan, bukan bikin crash. */
+export function parseAdminIds(raw: string): bigint[] {
+  return raw
+    .split(',')
+    .map((bagian) => bagian.trim())
+    .filter((bagian) => /^\d+$/.test(bagian))
+    .map((bagian) => BigInt(bagian));
+}
+
+export const ADMIN_TELEGRAM_IDS = parseAdminIds(process.env.ADMIN_TELEGRAM_IDS ?? '');
+
+/**
+ * Gerbang perintah admin. Menyembunyikan perintah dari menu Telegram hanya kosmetik —
+ * perintah yang tidak terdaftar tetap bisa diketik siapa saja, jadi pemeriksaan di sini
+ * adalah satu-satunya yang benar-benar menahan.
+ *
+ * Daftar kosong berarti tidak ada yang admin, bukan semua orang admin.
+ */
+export function isAdmin(telegramId: bigint | number): boolean {
+  return ADMIN_TELEGRAM_IDS.includes(BigInt(telegramId));
+}

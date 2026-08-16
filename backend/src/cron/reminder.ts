@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { prisma } from '../db';
 import { createBot, kirimMassal, type PesanMassal } from '../lib/telegram';
 import { isUserOnLeave } from '../services/calendar';
+import { labelLibur } from '../services/holiday';
 import { todayWIB, weekdayOf } from '../lib/time';
 
 const bot = createBot(process.env.BOT_TOKEN!);
@@ -11,6 +12,12 @@ export async function sendCheckInReminders() {
   const weekday = weekdayOf(today);
   if (weekday === 0 || weekday === 6) {
     console.log('Reminder check-in: akhir pekan, dilewati');
+    return;
+  }
+
+  const libur = await labelLibur(today);
+  if (libur) {
+    console.log(`Reminder check-in: hari libur (${libur}), dilewati`);
     return;
   }
 
@@ -39,6 +46,12 @@ export async function sendCheckOutReminders() {
   const today = todayWIB();
   if (weekdayOf(today) === 0 || weekdayOf(today) === 6) {
     console.log('Reminder check-out: akhir pekan, dilewati');
+    return;
+  }
+
+  const libur = await labelLibur(today);
+  if (libur) {
+    console.log(`Reminder check-out: hari libur (${libur}), dilewati`);
     return;
   }
 

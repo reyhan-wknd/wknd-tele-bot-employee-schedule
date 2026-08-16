@@ -14,6 +14,7 @@ const prismaTiruan = {
   attendance: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   schedule: { findMany: vi.fn() },
   userSchedule: { findUnique: vi.fn() },
+  holiday: { findMany: vi.fn() },
 };
 vi.mock('./db', () => ({ prisma: prismaTiruan }));
 
@@ -51,6 +52,8 @@ beforeEach(() => {
 
   prismaTiruan.user.findUnique.mockResolvedValue(USER);
   prismaTiruan.attendance.update.mockResolvedValue({});
+  // Bawaannya hari biasa; tes hari libur mengisinya sendiri.
+  prismaTiruan.holiday.findMany.mockResolvedValue([]);
   // Senin, 17 Agustus 2026, 11:00 WIB — hari kerja, sebelum jam pulang.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-08-17T04:00:00Z'));
@@ -138,6 +141,36 @@ describe('/check_in tetap menolak saat cuti', () => {
   test('tidak cuti — check-in berjalan normal', async () => {
     isUserOnLeave.mockResolvedValue(false);
     prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+
+    await perintah('/check_in');
+
+    expect(prismaTiruan.attendance.create).toHaveBeenCalledOnce();
+    expect(terkirim.join('\n')).toContain('Check-in berhasil');
+  });
+});
+
+/** Waktu tes ini memang 17 Agustus 2026 — Hari Kemerdekaan, dan jatuh di hari Senin. */
+describe('/check_in di hari libur meminta konfirmasi dulu', () => {
+  const KEMERDEKAAN = [{ year: 0, month: 8, day: 17, label: 'Hari Kemerdekaan' }];
+
+  test('entri berulang menahan pencatatan dan menawarkan tombol', async () => {
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+    prismaTiruan.holiday.findMany.mockResolvedValue(KEMERDEKAAN);
+
+    await perintah('/check_in');
+
+    expect(prismaTiruan.attendance.create).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toContain('Hari Kemerdekaan');
+    expect(terkirim.join('\n')).toMatch(/tetap mau check-in/i);
+  });
+
+  test('entri khusus tahun lain tidak ikut menahan', async () => {
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+    prismaTiruan.holiday.findMany.mockResolvedValue([
+      { year: 2027, month: 8, day: 17, label: 'Kemerdekaan 2027' },
+    ]);
 
     await perintah('/check_in');
 

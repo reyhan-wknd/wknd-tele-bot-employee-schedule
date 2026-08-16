@@ -60,6 +60,28 @@ npx tsx src/cron/reminder-wfo.ts weekly
 
 3. **Schedule pairing**: identity comes entirely from the Google-verified email. `pairUserByEmail` (`services/schedule.ts`) looks for an employee whose email matches exactly and stores that NIK in `user_schedules`. There is no user-facing NIK entry or confirmation step — the user can never influence which employee record they are bound to. If no employee matches, the user is told to contact an admin and `/schedule` retries the pairing later.
 
+### Hari Libur
+
+Holidays are held in the `holidays` table and managed by hand through `/manage_holiday`,
+because no automatic source is trustworthy enough on its own.
+
+- **`year = 0` means "every year"**, any other value means that year only. NULL is
+  deliberately *not* used for this: MySQL treats each NULL as distinct inside a unique
+  index, so two recurring `08-17` rows would both slip past `@@unique([year, month, day])`.
+- Most Indonesian public holidays move each year (Idul Fitri, Nyepi, Waisak, Imlek), and
+  *cuti bersama* are decreed annually — those are stored as one-off rows. Only the five
+  genuinely fixed dates are recurring.
+- **Emptiness is never treated as a holiday signal.** An earlier design inferred holidays
+  from a missing `schedules` row; that was wrong because `schedules` is the *WFO* roster —
+  a working day where everyone is WFH looks identical to a public holiday, as does a week
+  the upstream has not published yet.
+- `services/holiday.ts` loads the whole table and matches in memory. The row count is tiny
+  (a dozen or two per year), and it keeps the recurring rule expressed once in
+  `lib/holiday.ts` instead of being restated as SQL.
+- Reminders skip holidays; `/check_in` does not, but asks for confirmation via an inline
+  button first. That button carries its date in `callback_data` and refuses to fire once
+  the day has rolled over.
+
 ### Data Sources
 
 - **MySQL** (via Prisma): users, attendances, schedules, user_schedules — local operational data
@@ -73,7 +95,10 @@ npx tsx src/cron/reminder-wfo.ts weekly
 | `backend/src/bot.ts` | All Telegraf commands and callback handlers; schedule display + attendance logic |
 | `backend/src/scheduler.ts` | Registers all 9 cron jobs in-process with `node-cron` |
 | `backend/src/routes/auth.ts` | `POST /auth/init` and `GET /auth/google/callback` OAuth endpoints |
-| `backend/src/config.ts` | `ALLOWED_EMAIL_DOMAINS` parsing and the `isAllowedEmail` gate |
+| `backend/src/config.ts` | `ALLOWED_EMAIL_DOMAINS` / `ADMIN_TELEGRAM_IDS` parsing and the `isAllowedEmail` / `isAdmin` gates |
+| `backend/src/lib/holiday.ts` | Holiday rules: date/command parsing, recurring-vs-one-off matching, the 365-day projection |
+| `backend/src/services/holiday.ts` | Holiday table access; loads all rows and matches in memory |
+| `backend/src/scripts/seed-holidays.ts` | Seeds holidays from Google's public Indonesian holiday ICS |
 | `backend/src/lib/time.ts` | Every WIB time calculation; host-timezone independent |
 | `backend/src/lib/crypto.ts` | AES-256-GCM encryption of OAuth tokens at rest |
 | `backend/src/services/calendar.ts` | Leave detection — an event counts as leave only when `eventType === 'outOfOffice'`; titles are never inspected |
@@ -116,6 +141,7 @@ Copy `backend/.env.example` to `backend/.env`. Required vars:
 | `ALLOWED_EMAIL_DOMAINS` | Comma-separated; defaults to `weekendinc.com` |
 | `TOKEN_ENCRYPTION_KEY` | **Required.** 32 bytes base64; the process refuses to start without it |
 | `AUTH_RATE_LIMIT` | Optional; `/auth` requests per minute per IP (default 10) |
+| `ADMIN_TELEGRAM_IDS` | Comma-separated Telegram IDs allowed to run `/manage_holiday`. Empty means nobody is admin, not everybody |
 
 Google OAuth must include scopes `openid email profile https://www.googleapis.com/auth/calendar.events.readonly`, and only the **Google Calendar API** needs enabling in the project — OIDC needs no separate API because the ID token is verified locally.
 

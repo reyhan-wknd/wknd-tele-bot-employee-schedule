@@ -63,3 +63,23 @@ model UserSchedule {
   @@index([employeeNik])
   @@map("user_schedules")
 }
+
+/// Hari libur, dikelola manual lewat /manage_holiday.
+///
+/// `year = 0` berarti berulang tiap tahun (17 Agustus), selain itu berlaku sekali saja
+/// (Idul Fitri, cuti bersama — tanggalnya bergeser tiap tahun).
+///
+/// Penanda "berulang" sengaja memakai 0, bukan NULL: MySQL menganggap tiap NULL sebagai
+/// nilai yang berbeda di unique index, sehingga dua entri 17 Agustus berulang akan
+/// sama-sama lolos dan constraint di bawah jadi tidak berarti.
+model Holiday {
+  id    Int    @id @default(autoincrement())
+  year  Int    @map("year")
+  month Int    @map("month")
+  day   Int    @map("day")
+  label String @map("label") @db.VarChar(255)
+
+  @@unique([year, month, day])
+  @@index([month, day])
+  @@map("holidays")
+}

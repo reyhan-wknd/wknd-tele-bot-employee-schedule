@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { createBot, kirimMassal, type PesanMassal } from '../lib/telegram';
 import { addDays, formatDateOnly, todayWIB, weekdayOf } from '../lib/time';
 import { formatProjects, groupSchedulesByDate } from '../lib/schedule';
+import { labelLibur } from '../services/holiday';
 
 const bot = createBot(process.env.BOT_TOKEN!);
 
@@ -23,6 +24,15 @@ async function pairingUserAktif() {
 
 export async function remindTomorrow() {
   const tomorrowDate = addDays(todayWIB(), 1);
+
+  // Biasanya hari libur memang tidak punya baris jadwal sehingga tidak ada yang dikirimi,
+  // tapi gerbang ini membuatnya pasti — sekaligus menjelaskan alasannya di log.
+  const libur = await labelLibur(tomorrowDate);
+  if (libur) {
+    console.log(`Reminder WFO besok: besok libur (${libur}), dilewati`);
+    return;
+  }
+
   const userSchedules = await pairingUserAktif();
 
   const jadwal = await prisma.schedule.findMany({
