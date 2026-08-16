@@ -2,8 +2,10 @@ import { describe, expect, test } from 'vitest';
 import {
   cocokHariLibur,
   libur365Hari,
+  MAKS_PANJANG_LABEL,
   parseArgumenTanggal,
   parsePerintahKelola,
+  potongMenjadiPesan,
   TAHUN_BERULANG,
   tanggalValid,
   type HariLibur,
@@ -95,6 +97,70 @@ describe('parsePerintahKelola', () => {
   test('perintah kosong ditolak, bukan bikin crash', () => {
     expect(parsePerintahKelola('').ok).toBe(false);
     expect(parsePerintahKelola('   ').ok).toBe(false);
+  });
+
+  test('label kepanjangan ditolak di sini, bukan dilempar ke MySQL', () => {
+    const panjang = 'x'.repeat(MAKS_PANJANG_LABEL + 1);
+    const hasil = parsePerintahKelola(`add 0817 ${panjang}`);
+
+    expect(hasil.ok).toBe(false);
+    if (!hasil.ok) expect(hasil.pesan).toMatch(/terlalu panjang/i);
+  });
+
+  test('label tepat di batas masih diterima', () => {
+    const pas = 'x'.repeat(MAKS_PANJANG_LABEL);
+    expect(parsePerintahKelola(`add 0817 ${pas}`).ok).toBe(true);
+  });
+
+  test('label berisi karakter markdown tetap diterima apa adanya', () => {
+    const hasil = parsePerintahKelola('add 0817 Hari *Kemerdekaan* _RI_');
+    expect(hasil.ok && hasil.nilai.label).toBe('Hari *Kemerdekaan* _RI_');
+  });
+
+  test('label multi-baris dirapatkan jadi satu baris', () => {
+    const hasil = parsePerintahKelola('add 0817 Hari\nKemerdekaan');
+    expect(hasil.ok && hasil.nilai.label).toBe('Hari Kemerdekaan');
+  });
+
+  test('tahun di luar rentang wajar ditolak', () => {
+    expect(parseArgumenTanggal('19690817').ok).toBe(false);
+    expect(parseArgumenTanggal('21010817').ok).toBe(false);
+    expect(parseArgumenTanggal('20260817').ok).toBe(true);
+  });
+});
+
+describe('potongMenjadiPesan', () => {
+  test('daftar kosong tidak menghasilkan pesan sama sekali', () => {
+    expect(potongMenjadiPesan('Judul\n\n', [])).toEqual([]);
+  });
+
+  test('daftar pendek muat dalam satu pesan berjudul', () => {
+    const pesan = potongMenjadiPesan('Judul\n\n', ['  • a', '  • b']);
+    expect(pesan).toHaveLength(1);
+    expect(pesan[0]).toBe('Judul\n\n  • a\n  • b');
+  });
+
+  test('daftar panjang dipecah dan tiap pesan tetap di bawah batas Telegram', () => {
+    const baris = Array.from({ length: 200 }, (_, i) => `  • ${'x'.repeat(100)} ${i}`);
+    const pesan = potongMenjadiPesan('Judul\n\n', baris);
+
+    expect(pesan.length).toBeGreaterThan(1);
+    for (const satu of pesan) expect(satu.length).toBeLessThan(4096);
+  });
+
+  test('tidak ada baris yang hilang saat dipecah', () => {
+    const baris = Array.from({ length: 200 }, (_, i) => `baris-${i}`);
+    const gabung = potongMenjadiPesan('Judul\n\n', baris).join('\n');
+
+    for (const satu of baris) expect(gabung).toContain(satu);
+  });
+
+  test('judul hanya muncul di pesan pertama', () => {
+    const baris = Array.from({ length: 200 }, (_, i) => `  • ${'x'.repeat(100)} ${i}`);
+    const pesan = potongMenjadiPesan('JUDUL\n\n', baris);
+
+    expect(pesan[0].startsWith('JUDUL')).toBe(true);
+    for (const lanjutan of pesan.slice(1)) expect(lanjutan).not.toContain('JUDUL');
   });
 });
 

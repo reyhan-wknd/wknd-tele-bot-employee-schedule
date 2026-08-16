@@ -18,7 +18,7 @@ import { formatProjects, groupSchedulesByDate } from './lib/schedule';
 import { bolehCheckin, bolehCheckout, durasiKerja, selisihJam } from './services/attendance';
 import { createBot } from './lib/telegram';
 import { ADMIN_TELEGRAM_IDS, isAdmin } from './config';
-import { parsePerintahKelola, TAHUN_BERULANG } from './lib/holiday';
+import { parsePerintahKelola, potongMenjadiPesan, TAHUN_BERULANG } from './lib/holiday';
 import {
   cariLibur,
   daftarUpcoming,
@@ -185,6 +185,7 @@ bot.command('start', async (ctx) => {
     '/login — hubungkan akun Google\n' +
     '/status — cek status\n' +
     '/schedule — jadwal WFO\n' +
+    '/holiday — daftar hari libur\n' +
     '/check_in — absen masuk\n' +
     '/check_out — absen pulang\n' +
     '/logout — hapus koneksi akun'
@@ -267,8 +268,9 @@ bot.command('check_in', async (ctx) => {
   // tercatat karena salah pencet, jadi minta konfirmasi dulu.
   const libur = await labelLibur(today);
   if (libur) {
-    await reply(ctx, `📅 Hari ini terdaftar libur: *${libur}*.\n\nTetap mau check-in?`, {
-      parse_mode: 'Markdown',
+    // Sengaja tanpa parse_mode: label ditulis admin dan bisa memuat * atau _, yang akan
+    // membuat Telegram menolak seluruh pesan karena markup-nya tidak seimbang.
+    await reply(ctx, `📅 Hari ini terdaftar libur: ${libur}.\n\nTetap mau check-in?`, {
       reply_markup: {
         inline_keyboard: [
           [
@@ -418,6 +420,8 @@ bot.command('logout', async (ctx) => {
 // --- Hari Libur ---
 
 bot.command('holiday', async (ctx) => {
+  if (!(await requireUser(ctx))) return;
+
   const daftar = await daftarUpcoming();
 
   if (daftar.length === 0) {
@@ -428,13 +432,12 @@ bot.command('holiday', async (ctx) => {
     return;
   }
 
-  let msg = '📅 Hari libur 365 hari ke depan:\n\n';
-  for (const libur of daftar) {
-    msg += `  • ${formatDateOnly(libur.tanggal)} — ${libur.label}${libur.berulang ? ' 🔁' : ''}\n`;
-  }
-  msg += '\n🔁 = berulang tiap tahun';
+  const baris = daftar.map((libur) => `  • ${formatDateOnly(libur.tanggal)} — ${libur.label}`);
 
-  await reply(ctx, msg);
+  // Daftar setahun penuh bisa melewati batas panjang pesan Telegram, jadi dipecah.
+  for (const pesan of potongMenjadiPesan('📅 Hari libur 365 hari ke depan:\n\n', baris)) {
+    await reply(ctx, pesan);
+  }
 });
 
 /**

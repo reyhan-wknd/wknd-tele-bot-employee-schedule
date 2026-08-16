@@ -14,6 +14,19 @@ export const TAHUN_BERULANG = 0;
 
 const HARI_DALAM_SETAHUN = 365;
 
+/**
+ * Kolom label muat 255 karakter, tapi batasnya sengaja jauh lebih ketat: nama hari libur
+ * itu pendek, dan label panjang membuat daftar /holiday menabrak batas pesan Telegram.
+ * Tanpa batas ini, label 257 karakter lolos sampai MySQL dan balasannya jadi error server.
+ */
+export const MAKS_PANJANG_LABEL = 100;
+
+/** Batas pesan Telegram 4096 karakter; sisakan ruang untuk judul dan pemenggalan. */
+const MAKS_PANJANG_PESAN = 3500;
+
+const TAHUN_MIN = 1970;
+const TAHUN_MAKS = 2100;
+
 export interface HariLibur {
   year: number;
   month: number;
@@ -63,7 +76,7 @@ export function parseArgumenTanggal(raw: string): Hasil<TanggalLibur> {
   const month = Number(bersih.slice(berulang ? 0 : 4, berulang ? 2 : 6));
   const day = Number(bersih.slice(berulang ? 2 : 6));
 
-  if (!berulang && year < 1970) {
+  if (!berulang && (year < TAHUN_MIN || year > TAHUN_MAKS)) {
     return { ok: false, pesan: `Tahun ${year} tidak masuk akal.` };
   }
 
@@ -118,6 +131,13 @@ export function parsePerintahKelola(sisa: string): Hasil<PerintahKelola> {
 
   if (aksi !== 'remove' && !label) {
     return { ok: false, pesan: `Label belum diisi.\n\n${CONTOH_PEMAKAIAN}` };
+  }
+
+  if (label.length > MAKS_PANJANG_LABEL) {
+    return {
+      ok: false,
+      pesan: `Label terlalu panjang (${label.length} karakter, maksimal ${MAKS_PANJANG_LABEL}).`,
+    };
   }
 
   return { ok: true, nilai: { aksi, tanggal: tanggal.nilai, label } };
@@ -183,4 +203,32 @@ export function libur365Hari(rows: readonly HariLibur[], mulai: Date): LiburMend
   }
 
   return [...terkumpul.values()].sort((a, b) => a.tanggal.getTime() - b.tanggal.getTime());
+}
+
+/**
+ * Pecah daftar baris menjadi beberapa pesan supaya tidak menabrak batas Telegram.
+ *
+ * Daftar libur bisa panjang — sekitar 30 entri setahun, dan tiap label boleh sampai
+ * seratus karakter — jadi satu pesan tidak selalu cukup.
+ */
+export function potongMenjadiPesan(judul: string, baris: readonly string[]): string[] {
+  if (baris.length === 0) return [];
+
+  const pesan: string[] = [];
+  let sekarang = judul;
+
+  for (const satu of baris) {
+    // Baris yang sendirian saja sudah kepanjangan tetap dikirim apa adanya, karena
+    // membuangnya diam-diam lebih buruk daripada satu pesan yang kepanjangan.
+    if (sekarang !== judul && sekarang.length + satu.length + 1 > MAKS_PANJANG_PESAN) {
+      pesan.push(sekarang);
+      sekarang = '';
+    }
+    // Judul sudah membawa pemisahnya sendiri, jadi jangan tambah baris kosong lagi.
+    const perluPemisah = sekarang !== '' && !sekarang.endsWith('\n');
+    sekarang += (perluPemisah ? '\n' : '') + satu;
+  }
+
+  if (sekarang) pesan.push(sekarang);
+  return pesan;
 }

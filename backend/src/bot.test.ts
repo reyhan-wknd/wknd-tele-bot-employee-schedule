@@ -149,6 +149,32 @@ describe('/check_in tetap menolak saat cuti', () => {
   });
 });
 
+describe('guest hanya boleh /start dan /login', () => {
+  beforeEach(() => {
+    prismaTiruan.user.findUnique.mockResolvedValue(null); // belum login
+  });
+
+  test('/holiday ditolak sebelum login dan tidak menyentuh tabel libur', async () => {
+    await perintah('/holiday');
+
+    expect(terkirim.join('\n')).toContain('belum terverifikasi');
+    expect(prismaTiruan.holiday.findMany).not.toHaveBeenCalled();
+  });
+
+  test.each(['/status', '/schedule', '/check_in', '/check_out', '/logout'])(
+    '%s juga ditolak sebelum login',
+    async (cmd) => {
+      await perintah(cmd);
+      expect(terkirim.join('\n')).toContain('belum terverifikasi');
+    }
+  );
+
+  test('/start tetap terbuka untuk guest', async () => {
+    await perintah('/start');
+    expect(terkirim.join('\n')).toContain('Selamat datang');
+  });
+});
+
 /** Waktu tes ini memang 17 Agustus 2026 — Hari Kemerdekaan, dan jatuh di hari Senin. */
 describe('/check_in di hari libur meminta konfirmasi dulu', () => {
   const KEMERDEKAAN = [{ year: 0, month: 8, day: 17, label: 'Hari Kemerdekaan' }];

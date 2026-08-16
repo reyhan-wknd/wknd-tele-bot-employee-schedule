@@ -11,13 +11,12 @@
  * Google hanya memuat sekitar satu tahun ke depan, jadi skrip ini memang perlu
  * dijalankan lagi tiap tahun.
  *
- * Hasilnya usulan, bukan kebenaran akhir: sebagian entri ditandai Google sendiri dengan
- * "(belum pasti)" dan baru pasti setelah SKB 3 Menteri terbit. Tinjau keluarannya, lalu
- * koreksi lewat /manage_holiday.
+ * Hasilnya usulan, bukan kebenaran akhir — tanggal libur keagamaan baru pasti setelah
+ * SKB 3 Menteri terbit. Tinjau keluarannya, lalu koreksi lewat /manage_holiday.
  */
 import 'dotenv/config';
 import { prisma } from '../db';
-import { TAHUN_BERULANG } from '../lib/holiday';
+import { MAKS_PANJANG_LABEL, TAHUN_BERULANG } from '../lib/holiday';
 import { simpanLibur } from '../services/holiday';
 import { todayWIB } from '../lib/time';
 
@@ -35,6 +34,20 @@ const TANGGAL_TETAP = new Set(['01-01', '05-01', '06-01', '08-17', '12-25']);
  * diam di hari kerja — kesalahan yang jauh lebih merugikan daripada kelewat satu libur.
  */
 const BUKAN_HARI_LIBUR = [/^1 ramadan/i, /^hari paskah$/i, /^malam tahun baru$/i];
+
+/**
+ * Google menandai sebagian tanggal dengan "(belum pasti)". Itu catatan proses, bukan nama
+ * hari liburnya, jadi tidak perlu ikut terbaca user di /holiday.
+ *
+ * Panjangnya juga dipotong ke batas yang sama dengan /manage_holiday, supaya label dari
+ * hulu tidak bisa menggagalkan seed dengan cara yang tidak bisa dilakukan admin.
+ */
+export function rapikanLabel(label: string): string {
+  return label
+    .replace(/\s*\((?:belum pasti|tentative)\)\s*$/i, '')
+    .trim()
+    .slice(0, MAKS_PANJANG_LABEL);
+}
 
 interface EntriIcs {
   isoDate: string;
@@ -93,7 +106,6 @@ async function main() {
 
   const dilewati: string[] = [];
   const ditulis: string[] = [];
-  const perluDitinjau: string[] = [];
 
   for (const entri of tahunIni) {
     if (BUKAN_HARI_LIBUR.some((pola) => pola.test(entri.label))) {
@@ -103,6 +115,7 @@ async function main() {
 
     const [, bulan, hari] = entri.isoDate.split('-');
     const berulang = TANGGAL_TETAP.has(`${bulan}-${hari}`);
+    const label = rapikanLabel(entri.label);
 
     await simpanLibur(
       {
@@ -110,11 +123,10 @@ async function main() {
         month: Number(bulan),
         day: Number(hari),
       },
-      entri.label
+      label
     );
 
-    ditulis.push(`${entri.isoDate}  ${entri.label}${berulang ? '  [berulang tiap tahun]' : ''}`);
-    if (/belum pasti/i.test(entri.label)) perluDitinjau.push(`${entri.isoDate}  ${entri.label}`);
+    ditulis.push(`${entri.isoDate}  ${label}${berulang ? '  [berulang tiap tahun]' : ''}`);
   }
 
   console.log(`\n=== Tersimpan (${ditulis.length}) ===`);
@@ -122,11 +134,6 @@ async function main() {
 
   console.log(`\n=== Dilewati karena bukan hari libur (${dilewati.length}) ===`);
   for (const baris of dilewati) console.log(`  ${baris}`);
-
-  if (perluDitinjau.length > 0) {
-    console.log(`\n=== Ditandai "belum pasti" oleh Google — periksa saat SKB terbit (${perluDitinjau.length}) ===`);
-    for (const baris of perluDitinjau) console.log(`  ${baris}`);
-  }
 
   console.log('\nTinjau daftar di atas, lalu koreksi lewat /manage_holiday bila perlu.');
 }
