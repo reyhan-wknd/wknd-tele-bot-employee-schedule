@@ -9,6 +9,7 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - **Database:** MySQL
 - **Tunnel:** Cloudflare Tunnel (named tunnel)
 - **Data Source:** Supabase (jadwal WFO)
+- **Deploy:** Docker Compose (backend + MySQL + sidecar cloudflared)
 
 ## Features
 
@@ -59,12 +60,19 @@ MySQL akan running di port `3309` dengan credentials:
 
 ### 3. Google Cloud Console
 
-1. Buat project baru di [Google Cloud Console](https://console.cloud.google.com)
-2. Enable "Google Identity" API
-3. Buat OAuth 2.0 Client ID (Web application)
-4. Tambahkan Authorized redirect URI: `https://your-domain.com/auth/google/callback`
-5. Tambahkan scope: `openid`, `email`, `profile`, `calendar.events.readonly`
-6. Tambahkan test user di OAuth consent screen (selama app masih "Testing")
+1. Buat project baru di [Google Cloud Console](https://console.cloud.google.com), **di bawah organisasi Google Workspace perusahaan** — bukan dari akun Gmail pribadi
+2. Enable **Google Calendar API** (hanya itu; `openid email profile` tidak butuh API terpisah karena ID token diverifikasi lokal)
+3. OAuth consent screen → **User type: Internal**
+4. Tambahkan scope: `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`, `.../auth/calendar.events.readonly`
+5. Buat OAuth 2.0 Client ID (Web application)
+6. Tambahkan Authorized redirect URI: `https://your-domain.com/auth/google/callback`
+
+Dengan **Internal**, semua akun di organisasi bisa login tanpa didaftarkan satu per satu,
+tidak ada verifikasi Google meski scope Calendar tergolong sensitive, dan refresh token
+tidak kedaluwarsa tiap 7 hari seperti pada status "Testing".
+
+Internal hanya tersedia bila project-nya **milik organisasi**. Menjadikan akun kantor
+sebagai IAM Owner di project pribadi tidak cukup — induk project-nya yang menentukan.
 
 ### 4. Telegram Bot
 
@@ -73,27 +81,35 @@ MySQL akan running di port `3309` dengan credentials:
 
 ### 5. Cloudflare Tunnel
 
+Sekali saja, untuk membuat tunnel dan DNS record-nya:
+
 ```bash
 cloudflared tunnel login
 cloudflared tunnel create <tunnel-name>
 cloudflared tunnel route dns <tunnel-name> <subdomain.your-domain.com>
 ```
 
-Buat config di `~/.cloudflared/config.yml`:
+Di **produksi**, connector-nya berjalan sebagai container sidecar dalam compose stack —
+confignya ada di `deploy/cloudflared.prod.yml` dan tidak perlu dijalankan manual
+(lihat bagian Deploy Produksi di bawah).
+
+Untuk menjalankan manual saat **development**, buat config di `~/.cloudflared/config.yml`:
 ```yaml
 tunnel: <TUNNEL_ID>
 credentials-file: ~/.cloudflared/<TUNNEL_ID>.json
 
 ingress:
   - hostname: <subdomain.your-domain.com>
-    service: http://localhost:3000
+    service: http://localhost:3000   # samakan dengan PORT backend
   - service: http_status:404
 ```
 
-Jalankan tunnel:
 ```bash
 cloudflared tunnel --config ~/.cloudflared/config.yml run
 ```
+
+> Jangan menjalankan dua connector untuk satu tunnel. Cloudflare akan membagi trafik ke
+> dua backend, sehingga update webhook masuk separuh-separuh ke masing-masing.
 
 ### 6. Environment Variables
 
@@ -119,24 +135,23 @@ Isi variabel berikut:
 | `TOKEN_ENCRYPTION_KEY` | Kunci enkripsi token OAuth di database, 32 byte base64 (wajib) |
 | `AUTH_RATE_LIMIT` | Batas permintaan /auth per menit per IP (default: 10) |
 
-### 7. Install & Run
+### 7. Install & Run (development)
 
 ```bash
 cd backend
 npm install
 npx prisma generate
 npx prisma migrate dev
+npm run dev          # foreground, auto-reload
 ```
 
-Development (foreground, auto-reload):
-```bash
-npm run dev
-```
+> Jangan pakai `npm run build && npm start`. `tsc` mengompilasi
+> `src/generated/prisma/*.ts` ke `dist/`, tapi **tidak** ikut menyalin binary query
+> engine Prisma (`libquery_engine-*.so.node`) di sebelahnya, jadi `dist/index.js` gagal
+> saat runtime. Jalankan lewat `tsx` — itu yang dipakai `npm run dev` maupun container
+> produksi.
 
-Background (dikelola systemd, auto-restart):
-```bash
-systemctl --user start wknd-tele-bot
-```
+Untuk deploy produksi, lihat bagian **Deploy Produksi** di bawah.
 
 ### 8. Frontend
 
@@ -174,6 +189,48 @@ npx tsx src/cron/reminder-wfo.ts weekly
 | 21:00 | Jumat | Reminder jadwal WFO minggu depan |
 | 23:00 | Senin-Jumat | Reminder check-out (3) |
 
+## Deploy Produksi
+
+Produksi berjalan di **nas-server** sebagai satu Docker Compose stack: MySQL + backend +
+sidecar `cloudflared`, semuanya `restart: unless-stopped`. Tahan reboot lewat docker
+daemon, jadi tidak ada systemd unit maupun crontab yang perlu dipasang.
+
+```bash
+cd ~/apps/wknd-tele-bot
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+| Lokasi | Isi |
+|---|---|
+| `~/apps/wknd-tele-bot/` | clone repo ini |
+| `~/apps/wknd-tele-bot/.env` | variabel compose — port, nama volume, password MySQL, path cloudflared (contoh: `deploy/prod.compose.env.example`) |
+| `~/.config/wknd-tele-bot/backend.env` | rahasia aplikasi, **di luar repo**, ditunjuk oleh `BACKEND_ENV_FILE` |
+| `~/.cloudflared/<tunnel-id>.json` | kredensial tunnel, mode 0600 |
+
+Backend hanya bind ke `127.0.0.1` untuk health check dan debug; trafik publik masuk lewat
+sidecar cloudflared yang menghubungi backend dengan nama service compose, bukan localhost.
+MySQL tidak membuka port host sama sekali.
+
+### Hal yang mudah menjebak
+
+- **Mengubah `backend.env` saja tidak berpengaruh.** Nilai `env_file` dibaca saat container
+  dibuat, jadi `docker compose restart` tetap memakai nilai lama. Pakai:
+  ```bash
+  docker compose -f docker-compose.prod.yml up -d --force-recreate backend
+  ```
+- **Build context-nya root repo, bukan `backend/`.** `package-lock.json` cuma ada di root
+  (`backend` adalah npm workspace), dan `index.ts` menyajikan frontend dari `../../frontend`,
+  jadi image harus mencerminkan layout repo: `/app/backend` + `/app/frontend`.
+- **`user:` container cloudflared harus sama dengan pemilik file kredensial**
+  (`CLOUDFLARED_USER`), kalau tidak file 0600-nya tidak terbaca.
+- Image memakai `node:22-slim` + `openssl` karena generator `prisma-client` memakai engine
+  glibc `debian-openssl-3.0.x`; Alpine butuh varian musl.
+
+### Migrasi database
+
+`docker compose` menjalankan `prisma migrate deploy` otomatis setiap container backend
+start, jadi migrasi tidak perlu dijalankan terpisah.
+
 ## Bot Modes
 
 - **Polling** (default): Set `BOT_MODE=polling` — cocok untuk development
@@ -206,14 +263,20 @@ dari sisi klien.
 
 ```
 ├── README.md
-├── docker-compose.yml
+├── docker-compose.yml            # MySQL untuk development
+├── docker-compose.prod.yml       # Stack produksi: MySQL + backend + cloudflared
+├── .dockerignore
 ├── package.json
+├── deploy/
+│   ├── cloudflared.prod.yml      # Ingress tunnel -> service `backend`
+│   └── prod.compose.env.example  # Contoh .env compose di mesin deploy
 ├── backend/
 │   ├── .env.example
+│   ├── Dockerfile                # Build context-nya ROOT repo, bukan backend/
 │   ├── prisma/
 │   │   └── schema.prisma
 │   ├── deploy/
-│   │   └── wknd-tele-bot.service # Unit systemd (Restart=always)
+│   │   └── wknd-tele-bot.service # Unit systemd — jalur non-Docker (opsional)
 │   ├── scripts/
 │   │   └── dump-db.sh            # Dump DB tanpa data tabel users
 │   └── src/

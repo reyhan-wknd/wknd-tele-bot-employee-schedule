@@ -1,7 +1,12 @@
-# Semua cron job dikelola oleh node-cron di dalam proses backend (src/scheduler.ts).
-# Backend dan cloudflared tunnel dikelola sebagai systemd user services:
+# Semua cron job dikelola oleh node-cron di dalam proses backend (src/scheduler.ts),
+# dengan timezone Asia/Jakarta. Tidak ada crontab yang perlu dipasang.
 #
-#   ~/.config/systemd/user/wknd-tele-bot.service
-#   ~/.config/systemd/user/cloudflared-wknd.service
+# Produksi: backend dan cloudflared jalan sebagai container dalam satu compose stack
+# (docker-compose.prod.yml), restart: unless-stopped. Lihat bagian "Deploy Produksi"
+# di README.
 #
-# Tidak ada crontab yang perlu dipasang.
+# Unit systemd di backend/deploy/wknd-tele-bot.service adalah jalur alternatif
+# non-Docker, bukan yang dipakai produksi saat ini.
+#
+# File ini sengaja dipertahankan supaya siapa pun yang mencarinya menemukan jawabannya
+# di sini, bukan menyimpulkan cron-nya hilang.
