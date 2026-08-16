@@ -1,0 +1,9 @@
+tunnel: 472d3a03-d2e7-41f1-8662-7e9df72179bb
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  # `backend` adalah nama service di docker-compose.prod.yml, bukan localhost —
+  # connector berjalan di containernya sendiri.
+  - hostname: wknd-tele-bot-emp.reyhandita.id
+    service: http://backend:3000
+  - service: http_status:404

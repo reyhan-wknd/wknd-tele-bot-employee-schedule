@@ -1,0 +1,70 @@
+# Stack produksi: MySQL + backend + connector Cloudflare Tunnel.
+#
+# docker-compose.yml (tanpa .prod) sengaja dibiarkan apa adanya — itu untuk MySQL dev di laptop.
+#
+# Jalankan dari root repo, dengan file .env di sebelahnya:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Variabelnya dibaca dari ./.env (lihat deploy/prod.compose.env.example).
+
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD wajib diisi di .env}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-tele_sso}"
+      TZ: "Asia/Jakarta"
+    volumes:
+      - db_data:/var/lib/mysql
+    # Sengaja tanpa port host: backend menghubunginya lewat jaringan compose (host `mysql`).
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - ${BACKEND_ENV_FILE:-./backend/.env}
+    environment:
+      PORT: "3000"
+      # node-cron sudah dipaku ke Asia/Jakarta di scheduler.ts; ini menyamakan sisa proses.
+      TZ: "Asia/Jakarta"
+      # Host dual-stack tanpa rute IPv6 membuat panggilan ke Google/Telegram menggantung.
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      # Loopback saja, untuk health check dan debug dari dalam server.
+      - "127.0.0.1:${BACKEND_HOST_PORT:-3102}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.6.1
+    # Harus cocok dengan pemilik file kredensial tunnel di host (mode 0600).
+    # UID user deploy berbeda-beda per mesin, jadi jangan dipaku ke satu nilai.
+    user: "${CLOUDFLARED_USER:-1000:1000}"
+    command: tunnel --config /etc/cloudflared/config.yml run
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ${CLOUDFLARED_CONFIG_FILE:-./deploy/cloudflared.prod.yml}:/etc/cloudflared/config.yml:ro
+      - ${CLOUDFLARED_CREDENTIALS_FILE:?CLOUDFLARED_CREDENTIALS_FILE wajib diisi di .env}:/etc/cloudflared/credentials.json:ro
+    restart: unless-stopped
+
+volumes:
+  db_data:
+    name: ${DATA_VOLUME_NAME:-wknd-tele-bot-data}

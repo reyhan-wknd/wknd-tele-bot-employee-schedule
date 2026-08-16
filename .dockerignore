@@ -1,0 +1,23 @@
+node_modules
+backend/node_modules
+
+# Client Prisma hasil generate di mesin developer membawa engine khusus platform itu.
+# Image meng-generate ulang sendiri, jadi versi lokal jangan ikut terbawa.
+backend/src/generated
+
+.env
+backend/.env
+backend/logs
+backend/dist
+nohup.out
+*.log
+
+.git
+.github
+.omc
+.claude
+
+# Dump database berisi token OAuth — jangan pernah masuk build context.
+*.sql
+*.sql.gz
+*.dump
