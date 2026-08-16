@@ -19,7 +19,10 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - `/status` — cek status verifikasi + absensi hari ini
 
 ### Absensi
-- `/check_in` — absen masuk (min. jam 08:00 WIB, hari kerja, bukan cuti)
+- `/check_in` — absen masuk (min. jam 08:00 WIB, bukan cuti)
+- Di akhir pekan dan hari libur, check-in tidak ditolak tapi diminta konfirmasi lewat
+  tombol dulu — yang memang masuk kerja tetap tercatat. Aturan jam 08:00 tetap mutlak,
+  termasuk di akhir pekan
 - `/check_out` — absen pulang (min. jam 18:00 WIB, min. 8 jam setelah check-in)
 - Deteksi cuti otomatis dari Google Calendar: event bertipe **Out of office** — judul tidak diperiksa
 - Satu event Out of office membuat hari itu terhitung cuti penuh, berapa pun durasinya
@@ -31,7 +34,7 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - Dua bentuk tanggal: `0817` berulang tiap tahun, `20260321` berlaku sekali saja —
   mayoritas libur nasional (Idul Fitri, Nyepi, Waisak, Imlek) bergeser tiap tahun
 - Di hari libur, reminder check-in/check-out berhenti; `/check_in` tetap boleh tapi
-  meminta konfirmasi lewat tombol dulu
+  meminta konfirmasi lewat tombol dulu — sama seperti di akhir pekan
 - Isi awal diambil dari kalender hari libur Indonesia milik Google, lalu dikoreksi manual
 
 ### Jadwal WFO

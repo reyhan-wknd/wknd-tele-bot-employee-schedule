@@ -254,23 +254,24 @@ bot.command('check_in', async (ctx) => {
   const today = todayWIB();
 
   const izin = bolehCheckin(weekdayOf(today), hourWIB());
-  if (!izin.boleh) {
-    await reply(
-      ctx,
-      izin.alasan === 'akhir-pekan'
-        ? '❌ Check-in hanya bisa dilakukan di hari kerja (Senin-Jumat).'
-        : '❌ Check-in hanya bisa dilakukan mulai jam 08:00 WIB.'
-    );
+  if (!izin.boleh && izin.alasan === 'belum-jam-kerja') {
+    await reply(ctx, '❌ Check-in hanya bisa dilakukan mulai jam 08:00 WIB.');
     return;
   }
 
-  // Hari libur tidak menutup check-in — sebagian orang memang masuk. Tapi jangan sampai
-  // tercatat karena salah pencet, jadi minta konfirmasi dulu.
+  // Akhir pekan dan hari libur tidak menutup check-in — sebagian orang memang masuk.
+  // Tapi jangan sampai tercatat karena salah pencet, jadi minta konfirmasi dulu.
+  // Keduanya bisa terjadi bersamaan, mis. Waisak yang jatuh di hari Minggu.
+  const alasanKonfirmasi: string[] = [];
+  if (!izin.boleh && izin.alasan === 'akhir-pekan') alasanKonfirmasi.push('hari ini akhir pekan');
+
   const libur = await labelLibur(today);
-  if (libur) {
+  if (libur) alasanKonfirmasi.push(`hari ini terdaftar libur: ${libur}`);
+
+  if (alasanKonfirmasi.length > 0) {
     // Sengaja tanpa parse_mode: label ditulis admin dan bisa memuat * atau _, yang akan
     // membuat Telegram menolak seluruh pesan karena markup-nya tidak seimbang.
-    await reply(ctx, `📅 Hari ini terdaftar libur: ${libur}.\n\nTetap mau check-in?`, {
+    await reply(ctx, `📅 Perhatian: ${alasanKonfirmasi.join(', dan ')}.\n\nTetap mau check-in?`, {
       reply_markup: {
         inline_keyboard: [
           [

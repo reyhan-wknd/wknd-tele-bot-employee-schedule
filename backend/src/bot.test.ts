@@ -204,3 +204,61 @@ describe('/check_in di hari libur meminta konfirmasi dulu', () => {
     expect(terkirim.join('\n')).toContain('Check-in berhasil');
   });
 });
+
+describe('/check_in di akhir pekan juga meminta konfirmasi', () => {
+  beforeEach(() => {
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+  });
+
+  test('Sabtu siang menahan pencatatan dan menyebut akhir pekan', async () => {
+    vi.setSystemTime(new Date('2026-08-22T03:00:00Z')); // Sabtu, 10:00 WIB
+
+    await perintah('/check_in');
+
+    expect(prismaTiruan.attendance.create).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toMatch(/akhir pekan/i);
+    expect(terkirim.join('\n')).toMatch(/tetap mau check-in/i);
+  });
+
+  test('Minggu siang diperlakukan sama', async () => {
+    vi.setSystemTime(new Date('2026-08-23T03:00:00Z')); // Minggu, 10:00 WIB
+
+    await perintah('/check_in');
+
+    expect(prismaTiruan.attendance.create).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toMatch(/akhir pekan/i);
+  });
+
+  test('Sabtu sebelum jam 08:00 tetap ditolak mutlak, tanpa tombol', async () => {
+    vi.setSystemTime(new Date('2026-08-21T23:00:00Z')); // Sabtu, 06:00 WIB
+
+    await perintah('/check_in');
+
+    expect(prismaTiruan.attendance.create).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toContain('08:00');
+    expect(terkirim.join('\n')).not.toMatch(/tetap mau check-in/i);
+  });
+
+  test('akhir pekan yang sekaligus hari libur menyebut dua-duanya', async () => {
+    vi.setSystemTime(new Date('2026-05-31T03:00:00Z')); // Minggu, Waisak
+    prismaTiruan.holiday.findMany.mockResolvedValue([
+      { year: 2026, month: 5, day: 31, label: 'Hari Raya Waisak' },
+    ]);
+
+    await perintah('/check_in');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toMatch(/akhir pekan/i);
+    expect(pesan).toContain('Hari Raya Waisak');
+  });
+
+  test('hari kerja biasa tetap langsung tercatat tanpa tombol', async () => {
+    vi.setSystemTime(new Date('2026-08-18T03:00:00Z')); // Selasa, 10:00 WIB
+
+    await perintah('/check_in');
+
+    expect(prismaTiruan.attendance.create).toHaveBeenCalledOnce();
+    expect(terkirim.join('\n')).toContain('Check-in berhasil');
+  });
+});

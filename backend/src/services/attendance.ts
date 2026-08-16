@@ -17,9 +17,19 @@ export interface Keputusan<T extends string> {
   sisaMenit?: number;
 }
 
+/**
+ * Dua alasan penolakan diperlakukan berbeda oleh pemanggilnya, jadi urutannya penting:
+ *
+ *   - `belum-jam-kerja` adalah penolakan mutlak.
+ *   - `akhir-pekan` hanya berarti "perlu dikonfirmasi dulu" — sebagian orang memang
+ *     masuk di akhir pekan, dan absensinya tetap harus bisa tercatat.
+ *
+ * Karena itu jam diperiksa lebih dulu. Kalau tidak, Sabtu jam 6 pagi akan menghasilkan
+ * `akhir-pekan`, lalu tombol konfirmasi membuat aturan jam 08:00 bisa ditembus.
+ */
 export function bolehCheckin(weekday: number, jamWIB: number): Keputusan<AlasanTolakCheckin> {
-  if (weekday === 0 || weekday === 6) return { boleh: false, alasan: 'akhir-pekan' };
   if (jamWIB < JAM_MULAI_CHECKIN) return { boleh: false, alasan: 'belum-jam-kerja' };
+  if (weekday === 0 || weekday === 6) return { boleh: false, alasan: 'akhir-pekan' };
   return { boleh: true };
 }
 

@@ -7,7 +7,7 @@ describe('bolehCheckin', () => {
     expect(bolehCheckin(5, 23)).toEqual({ boleh: true });
   });
 
-  test('akhir pekan ditolak lebih dulu, apa pun jamnya', () => {
+  test('akhir pekan ditandai, bukan ditolak mutlak — pemanggilnya yang minta konfirmasi', () => {
     expect(bolehCheckin(0, 10)).toEqual({ boleh: false, alasan: 'akhir-pekan' });
     expect(bolehCheckin(6, 10)).toEqual({ boleh: false, alasan: 'akhir-pekan' });
   });
@@ -15,6 +15,13 @@ describe('bolehCheckin', () => {
   test('sebelum jam 08:00 ditolak', () => {
     expect(bolehCheckin(1, 7)).toEqual({ boleh: false, alasan: 'belum-jam-kerja' });
     expect(bolehCheckin(1, 0)).toEqual({ boleh: false, alasan: 'belum-jam-kerja' });
+  });
+
+  test('akhir pekan sebelum jam 08:00 tetap dilaporkan sebagai belum-jam-kerja', () => {
+    // Kalau urutannya terbalik, alasannya jadi akhir-pekan, dan tombol konfirmasi akan
+    // membuat aturan jam 08:00 bisa ditembus di hari Sabtu.
+    expect(bolehCheckin(6, 6)).toEqual({ boleh: false, alasan: 'belum-jam-kerja' });
+    expect(bolehCheckin(0, 3)).toEqual({ boleh: false, alasan: 'belum-jam-kerja' });
   });
 });
 

@@ -81,6 +81,11 @@ because no automatic source is trustworthy enough on its own.
 - Reminders skip holidays; `/check_in` does not, but asks for confirmation via an inline
   button first. That button carries its date in `callback_data` and refuses to fire once
   the day has rolled over.
+- **Weekends behave the same way as holidays** for `/check_in`: confirmation, not refusal,
+  since some people do work them. `bolehCheckin` therefore checks the hour *before* the
+  weekday — otherwise Saturday 06:00 would report `akhir-pekan`, and confirming would let
+  someone slip past the 08:00 rule. `belum-jam-kerja` stays an outright refusal on every
+  day of the week.
 
 ### Data Sources
 
