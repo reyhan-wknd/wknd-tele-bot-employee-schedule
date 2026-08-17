@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { Context } from 'telegraf';
+import { message } from 'telegraf/filters';
 import type { Express } from 'express';
 import { prisma } from './db';
 import { isUserOnLeave } from './services/calendar';
@@ -10,12 +11,15 @@ import {
   formatDateOnly,
   formatTimeWIB,
   hourWIB,
+  instanWIB,
   isoDateOf,
+  parseJamWIB,
   todayWIB,
   weekdayOf,
 } from './lib/time';
+import { batalkanReminderCheckout, jadwalkanReminderCheckout } from './services/job-queue';
 import { formatProjects, groupSchedulesByDate } from './lib/schedule';
-import { bolehCheckin, bolehCheckout, durasiKerja, selisihJam } from './services/attendance';
+import { ambangCheckout, bolehCheckin, bolehCheckout, durasiKerja, selisihJam } from './services/attendance';
 import { createBot } from './lib/telegram';
 import { ADMIN_TELEGRAM_IDS, isAdmin } from './config';
 import { parsePerintahKelola, potongMenjadiPesan, TAHUN_BERULANG } from './lib/holiday';
@@ -239,11 +243,25 @@ async function lakukanCheckin(
   }
 
   const realNow = new Date();
-  await prisma.attendance.create({
+  const absensi = await prisma.attendance.create({
     data: { telegramId, date: today, checkIn: realNow },
   });
 
-  return `✅ Check-in berhasil!\n\n🕐 ${formatTimeWIB(realNow)}`;
+  // Reminder check-out dijadwalkan sekarang, tepat di ambang jam pulang orang ini.
+  // Kegagalannya tidak boleh membatalkan absensi yang sudah tercatat.
+  const { ambang } = ambangCheckout(realNow);
+  const adaReminder = await jadwalkanReminderCheckout(telegramId, absensi.id, realNow, today).catch(
+    (err) => {
+      console.error(`Gagal menjadwalkan reminder check-out untuk ${telegramId}:`, errorMessage(err));
+      return false;
+    }
+  );
+
+  const catatan = adaReminder
+    ? `\n📌 Jam pulang: ${formatTimeWIB(ambang)}`
+    : '\n📌 Check-out terkunci pukul 23:59. Lewat dari itu, jamnya dimasukkan manual besok.';
+
+  return `✅ Check-in berhasil!\n\n🕐 ${formatTimeWIB(realNow)}${catatan}`;
 }
 
 bot.command('check_in', async (ctx) => {
@@ -323,13 +341,40 @@ bot.action(/^ci:(ok|batal):(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
   await selesai(await lakukanCheckin(ctx, sesi.telegramId, sesi.user));
 });
 
+/** Absensi hari lalu yang belum ditutup — jamnya harus dikoreksi manual, bukan diisi "sekarang". */
+async function absensiTertinggal(telegramId: bigint) {
+  return prisma.attendance.findFirst({
+    where: { telegramId, checkOut: null, date: { lt: todayWIB() } },
+    orderBy: { date: 'desc' },
+  });
+}
+
+function pesanMintaJam(absensi: { date: Date; checkIn: Date }): string {
+  return (
+    `⚠️ Absensi ${formatDateOnly(absensi.date)} belum kamu tutup, dan check-out tidak bisa ` +
+    `melewati hari.\n\n🕐 Check-in: ${formatTimeWIB(absensi.checkIn)}\n\n` +
+    'Balas pesan ini dengan jam pulangmu hari itu, format HH:MM — misalnya 17:30. Maksimal 23:59.'
+  );
+}
+
+/** Menutup absensi dan membereskan reminder yang masih mengantre untuknya. */
+async function tutupAbsensi(attendanceId: number, checkOut: Date): Promise<void> {
+  await prisma.attendance.update({ where: { id: attendanceId }, data: { checkOut } });
+  await batalkanReminderCheckout(attendanceId);
+}
+
+function ringkasanCheckout(checkIn: Date, checkOut: Date, tanggal?: Date): string {
+  const durasi = durasiKerja(selisihJam(checkIn, checkOut));
+  const keterangan = tanggal ? `\n📅 Untuk absensi ${formatDateOnly(tanggal)}` : '';
+  return `✅ Check-out berhasil!\n\n🕐 ${formatTimeWIB(checkOut)}\n⏱️ Durasi kerja: ${durasi.jam}j ${durasi.menit}m${keterangan}`;
+}
+
 bot.command('check_out', async (ctx) => {
   const sesi = await requireUser(ctx);
   if (!sesi) return;
-  const { telegramId, user } = sesi;
+  const { telegramId } = sesi;
 
   const today = todayWIB();
-  const kemarin = addDays(today, -1);
 
   const hariIni = await prisma.attendance.findUnique({
     where: { telegramId_date: { telegramId, date: today } },
@@ -340,46 +385,127 @@ bot.command('check_out', async (ctx) => {
     return;
   }
 
-  // Absensi kemarin yang belum ditutup masih boleh diselesaikan lewat tengah malam —
-  // dulu tanggalnya sudah berganti dan barisnya tertinggal terbuka selamanya.
-  const attendance =
-    hariIni ??
-    (await prisma.attendance.findFirst({
-      where: { telegramId, date: kemarin, checkOut: null },
-    }));
+  // Absensi hari lalu tidak ditutup dengan jam sekarang: itu akan mencatat jam pulang yang
+  // salah. Orangnya cuma lupa, jadi jamnya ditanyakan.
+  if (!hariIni) {
+    const tertinggal = await absensiTertinggal(telegramId);
+    if (!tertinggal) {
+      await reply(ctx, '❌ Kamu belum check-in hari ini. Gunakan /check_in terlebih dahulu.');
+      return;
+    }
 
-  if (!attendance) {
-    await reply(ctx, '❌ Kamu belum check-in hari ini. Gunakan /check_in terlebih dahulu.');
+    await reply(ctx, pesanMintaJam(tertinggal), { reply_markup: { force_reply: true } });
     return;
   }
 
-  const lanjutanKemarin = attendance.date.getTime() !== today.getTime();
   const realNow = new Date();
-  const jamKerja = selisihJam(attendance.checkIn, realNow);
+  const izin = bolehCheckout(hariIni.checkIn, realNow);
 
-  const izin = bolehCheckout({ lanjutanKemarin, jamWIB: hourWIB(), jamKerja });
   if (!izin.boleh) {
+    const durasi = durasiKerja(selisihJam(hariIni.checkIn, realNow));
     await reply(
       ctx,
-      izin.alasan === 'belum-jam-pulang'
-        ? '❌ Check-out hanya bisa dilakukan mulai jam 18:00 WIB.'
-        : `❌ Minimal 8 jam setelah check-in. Sisa ${izin.sisaMenit} menit lagi.`
+      `⏱️ Baru ${durasi.jam}j ${durasi.menit}m sejak check-in — kurang ${izin.sisaMenit} menit ` +
+        'dari jam kerja seharusnya.\n\nTetap mau check-out sekarang?',
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Ya, check-out', callback_data: `co:ok:${hariIni.id}` },
+              { text: '❌ Batal', callback_data: `co:batal:${hariIni.id}` },
+            ],
+          ],
+        },
+      }
     );
     return;
   }
 
-  await prisma.attendance.update({
-    where: { id: attendance.id },
-    data: { checkOut: realNow },
-  });
+  await tutupAbsensi(hariIni.id, realNow);
+  await reply(ctx, ringkasanCheckout(hariIni.checkIn, realNow));
+});
 
-  const durasi = durasiKerja(jamKerja);
+/**
+ * Tombol konfirmasi check-out sebelum jam kerja genap.
+ *
+ * Yang dibawa callback_data adalah id absensi, bukan tanggal seperti pada check-in, karena
+ * absensi sasarannya bisa saja bukan milik hari ini. Kepemilikan dan keterbukaannya
+ * diperiksa ulang supaya tombol lama tidak bisa menutup absensi yang salah.
+ */
+bot.action(/^co:(ok|batal):(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => undefined);
 
-  const keterangan = lanjutanKemarin ? `\n📅 Untuk absensi ${formatDateOnly(attendance.date)}` : '';
-  await reply(
-    ctx,
-    `✅ Check-out berhasil!\n\n🕐 ${formatTimeWIB(realNow)}\n⏱️ Durasi kerja: ${durasi.jam}j ${durasi.menit}m${keterangan}`
-  );
+  const [, pilihan, idMentah] = ctx.match;
+
+  const selesai = async (teks: string) => {
+    try {
+      await ctx.editMessageText(teks);
+    } catch {
+      await reply(ctx, teks);
+    }
+  };
+
+  if (pilihan === 'batal') {
+    await selesai('👍 Check-out dibatalkan.');
+    return;
+  }
+
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+
+  const absensi = await prisma.attendance.findUnique({ where: { id: Number(idMentah) } });
+  if (!absensi || absensi.telegramId !== sesi.telegramId) {
+    await selesai('⚠️ Absensi itu tidak ditemukan.');
+    return;
+  }
+  if (absensi.checkOut) {
+    await selesai(`❌ Absensi itu sudah ditutup (${formatTimeWIB(absensi.checkOut)}).`);
+    return;
+  }
+
+  // Hari sudah berganti sejak tombolnya muncul — jam sekarang bukan lagi jam yang benar.
+  if (absensi.date.getTime() !== todayWIB().getTime()) {
+    await selesai('⌛ Harinya sudah berganti. Kirim /check_out lagi untuk memasukkan jam pulangmu.');
+    return;
+  }
+
+  const realNow = new Date();
+  await tutupAbsensi(absensi.id, realNow);
+  await selesai(ringkasanCheckout(absensi.checkIn, realNow));
+});
+
+/**
+ * Balasan berisi jam pulang untuk absensi yang terlewat.
+ *
+ * Didaftarkan setelah semua perintah supaya tidak menelannya. Statusnya tidak disimpan di
+ * memori — absensi sasarannya dicari ulang dari database, jadi restart di tengah percakapan
+ * tidak merusak apa pun.
+ */
+bot.on(message('text'), async (ctx, next) => {
+  const balasanKeBot = ctx.message.reply_to_message?.from?.id === ctx.botInfo?.id;
+  if (!balasanKeBot) return next();
+
+  const telegramId = BigInt(ctx.from.id);
+  const tertinggal = await absensiTertinggal(telegramId);
+  if (!tertinggal) return next();
+
+  const jam = parseJamWIB(ctx.message.text);
+  if (!jam) {
+    await reply(ctx, '❌ Format jamnya belum benar. Tulis seperti 17:30 (maksimal 23:59).');
+    return;
+  }
+
+  const checkOut = instanWIB(isoDateOf(tertinggal.date), jam.jam, jam.menit);
+  if (checkOut <= tertinggal.checkIn) {
+    await reply(
+      ctx,
+      `❌ Jam pulang harus setelah jam check-in (${formatTimeWIB(tertinggal.checkIn)}).`
+    );
+    return;
+  }
+
+  await tutupAbsensi(tertinggal.id, checkOut);
+  await reply(ctx, ringkasanCheckout(tertinggal.checkIn, checkOut, tertinggal.date));
 });
 
 bot.command('status', async (ctx) => {

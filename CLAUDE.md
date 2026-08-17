@@ -87,6 +87,35 @@ because no automatic source is trustworthy enough on its own.
   someone slip past the 08:00 rule. `belum-jam-kerja` stays an outright refusal on every
   day of the week.
 
+### Jam kerja dan reminder check-out
+
+The work day officially starts at **09:00** with a **12:00–13:00** lunch hour:
+
+```
+mulaiEfektif = max(checkIn, 09:00)
+istirahat    = whatever is left of the 12:00–13:00 window after mulaiEfektif, capped at 60m
+ambang       = mulaiEfektif + 8h + istirahat
+```
+
+- Arriving early does not pull the finish line forward. The break is **proportional**, which
+  keeps the threshold continuous: a 12:30 start and a 13:00 start both land on 21:00, so
+  nudging your check-in by a minute buys nothing. `ambangCheckout` in
+  `services/attendance.ts` is the single source of this rule.
+- There is **no clock gate on check-out** any more. Below the threshold the bot asks for
+  confirmation rather than refusing.
+- **Check-out may never cross into the next day** (max 23:59 on the check-in date). An
+  attendance still open the following day is treated as forgotten: `/check_out` then asks
+  for the real finish time and the user answers `HH:MM`. That reply handler is the only
+  free-text handler in the bot, and it must stay registered *after* every `bot.command`.
+  It keeps no in-memory state — the target attendance is looked up again from the database,
+  so a restart mid-conversation breaks nothing.
+- **Check-out reminders are not cron jobs.** They are rows in `scheduled_jobs`, dispatched
+  at check-in for that person's own threshold and re-dispatched an hour at a time until
+  23:00. A DB table rather than `setTimeout` because the process restarts on every deploy;
+  MySQL rather than Redis because the server has no Redis and one small queue does not
+  justify a container. Because they are born from a real check-in rather than the calendar,
+  these reminders **do fire on weekends and holidays**, unlike the check-in reminders.
+
 ### Data Sources
 
 - **MySQL** (via Prisma): users, attendances, schedules, user_schedules — local operational data
@@ -98,7 +127,8 @@ because no automatic source is trustworthy enough on its own.
 |------|---------------|
 | `backend/src/index.ts` | Express server entry; mounts auth router, serves frontend static files, starts bot + scheduler |
 | `backend/src/bot.ts` | All Telegraf commands and callback handlers; schedule display + attendance logic |
-| `backend/src/scheduler.ts` | Registers all 9 cron jobs in-process with `node-cron` |
+| `backend/src/scheduler.ts` | Registers the in-process `node-cron` jobs, including the queue worker |
+| `backend/src/services/job-queue.ts` | Delayed-job table on MySQL; drives the chained check-out reminders |
 | `backend/src/routes/auth.ts` | `POST /auth/init` and `GET /auth/google/callback` OAuth endpoints |
 | `backend/src/config.ts` | `ALLOWED_EMAIL_DOMAINS` / `ADMIN_TELEGRAM_IDS` parsing and the `isAllowedEmail` / `isAdmin` gates |
 | `backend/src/lib/holiday.ts` | Holiday rules: date/command parsing, recurring-vs-one-off matching, the 365-day projection |

@@ -88,6 +88,29 @@ export function wibDayBounds(instant: Date = new Date()): { start: Date; end: Da
   };
 }
 
+/**
+ * Instant sungguhan dari tanggal WIB plus offset menit sejak tengah malam.
+ *
+ * `menit` sengaja boleh melebihi 59 — pemanggilnya sering memegang total menit hasil
+ * hitungan, dan meluber ke jam berikutnya adalah perilaku yang diinginkan.
+ */
+export function instanWIB(isoDate: string, jam: number, menit: number): Date {
+  const tengahMalam = new Date(`${isoDate}T00:00:00.000${WIB_OFFSET}`);
+  return new Date(tengahMalam.getTime() + (jam * 60 + menit) * 60_000);
+}
+
+/** Baca "17:30" atau "17.30" yang diketik user. Mengembalikan null bila tidak masuk akal. */
+export function parseJamWIB(raw: string): { jam: number; menit: number } | null {
+  const cocok = /^(\d{1,2})[:.](\d{2})$/.exec(raw.trim());
+  if (!cocok) return null;
+
+  const jam = Number(cocok[1]);
+  const menit = Number(cocok[2]);
+  if (jam > 23 || menit > 59) return null;
+
+  return { jam, menit };
+}
+
 /** Jam:menit WIB dari satu instant. */
 export function formatTimeWIB(instant: Date): string {
   return instant.toLocaleTimeString('id-ID', {

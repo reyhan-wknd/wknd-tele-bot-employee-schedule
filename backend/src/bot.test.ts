@@ -15,6 +15,7 @@ const prismaTiruan = {
   schedule: { findMany: vi.fn() },
   userSchedule: { findUnique: vi.fn() },
   holiday: { findMany: vi.fn() },
+  scheduledJob: { create: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
 };
 vi.mock('./db', () => ({ prisma: prismaTiruan }));
 
@@ -54,6 +55,10 @@ beforeEach(() => {
   prismaTiruan.attendance.update.mockResolvedValue({});
   // Bawaannya hari biasa; tes hari libur mengisinya sendiri.
   prismaTiruan.holiday.findMany.mockResolvedValue([]);
+  prismaTiruan.attendance.create.mockResolvedValue({ id: 1 });
+  prismaTiruan.scheduledJob.create.mockResolvedValue({ id: 1 });
+  prismaTiruan.scheduledJob.updateMany.mockResolvedValue({ count: 0 });
+  prismaTiruan.scheduledJob.findMany.mockResolvedValue([]);
   // Senin, 17 Agustus 2026, 11:00 WIB — hari kerja, sebelum jam pulang.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-08-17T04:00:00Z'));
@@ -78,6 +83,26 @@ const perintah = (text: string) =>
     },
   } as never);
 
+/** Balasan user ke pesan bot — bentuk yang dihasilkan force_reply di klien Telegram. */
+const balasanKeBot = (text: string) =>
+  bot.handleUpdate({
+    update_id: 2,
+    message: {
+      message_id: 2,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: 839050319, type: 'private' },
+      from: { id: 839050319, is_bot: false, first_name: 'Reyhan' },
+      text,
+      reply_to_message: {
+        message_id: 1,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 839050319, type: 'private' },
+        from: { id: 1, is_bot: true, first_name: 'uji', username: 'uji_bot' },
+        text: 'Balas pesan ini dengan jam pulangmu',
+      },
+    },
+  } as never);
+
 const absensi = (jamCheckInWIB: string, checkOut: Date | null = null) => ({
   id: 1,
   telegramId: USER.telegramId,
@@ -99,30 +124,78 @@ describe('/check_out saat user mendadak cuti', () => {
     expect(isUserOnLeave).not.toHaveBeenCalled(); // status cuti tidak ikut diperiksa
   });
 
-  test('aturan jam pulang tetap berlaku, bukan dilonggarkan karena cuti', async () => {
+  test('belum genap jam kerja minta konfirmasi, bukan ditolak karena jam', async () => {
     isUserOnLeave.mockResolvedValue(true);
     prismaTiruan.attendance.findUnique.mockResolvedValue(absensi('2026-08-17T02:00:00Z'));
-    // masih 11:00 WIB
+    // masih 11:00 WIB, ambangnya 18:00
 
     await perintah('/check_out');
 
     expect(prismaTiruan.attendance.update).not.toHaveBeenCalled();
-    expect(terkirim.join('\n')).toContain('mulai jam 18:00');
+    expect(terkirim.join('\n')).toMatch(/tetap mau check-out/i);
+  });
+});
+
+describe('/check_out untuk absensi yang terlewat', () => {
+  const KEMARIN = {
+    ...absensi('2026-08-16T02:00:00Z'), // check-in 09:00 WIB tanggal 16
+    id: 77,
+    date: new Date('2026-08-16T00:00:00.000Z'),
+  };
+
+  beforeEach(() => {
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null); // belum check-in hari ini
+    prismaTiruan.attendance.findFirst.mockResolvedValue(KEMARIN);
   });
 
-  test('absensi kemarin yang menggantung tetap bisa ditutup lewat tengah malam', async () => {
-    isUserOnLeave.mockResolvedValue(true);
-    prismaTiruan.attendance.findUnique.mockResolvedValue(null); // belum ada absensi hari ini
-    prismaTiruan.attendance.findFirst.mockResolvedValue({
-      ...absensi('2026-08-17T02:00:00Z'),
-      date: new Date('2026-08-17T00:00:00.000Z'),
-    });
-    vi.setSystemTime(new Date('2026-08-17T17:30:00Z')); // 00:30 WIB tanggal 18
-
+  test('bot bertanya jamnya, tidak menutup dengan jam sekarang', async () => {
     await perintah('/check_out');
 
+    expect(prismaTiruan.attendance.update).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toMatch(/format HH:MM/i);
+  });
+
+  test('balasan jam menutup absensi pada tanggalnya sendiri, bukan hari ini', async () => {
+    await balasanKeBot('17:30');
+
     expect(prismaTiruan.attendance.update).toHaveBeenCalledOnce();
+    const checkOut = prismaTiruan.attendance.update.mock.calls[0][0].data.checkOut as Date;
+    // 17:30 WIB tanggal 16 = 10:30Z tanggal 16
+    expect(checkOut.toISOString()).toBe('2026-08-16T10:30:00.000Z');
     expect(terkirim.join('\n')).toContain('Check-out berhasil');
+  });
+
+  test('titik sebagai pemisah juga diterima', async () => {
+    await balasanKeBot('17.30');
+    expect(prismaTiruan.attendance.update).toHaveBeenCalledOnce();
+  });
+
+  test('jam yang lebih awal dari check-in ditolak', async () => {
+    await balasanKeBot('08:00'); // check-in 09:00
+
+    expect(prismaTiruan.attendance.update).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toContain('setelah jam check-in');
+  });
+
+  test('format ngawur ditolak dengan contoh, bukan error server', async () => {
+    await balasanKeBot('kemarin sore');
+
+    expect(prismaTiruan.attendance.update).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toContain('17:30');
+  });
+
+  test('jam di luar 23:59 ditolak', async () => {
+    await balasanKeBot('24:00');
+    expect(prismaTiruan.attendance.update).not.toHaveBeenCalled();
+  });
+
+  test('reminder yang mengantre ikut dibatalkan setelah ditutup', async () => {
+    await balasanKeBot('17:30');
+
+    expect(prismaTiruan.scheduledJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { attendanceId: 77, status: 'pending' } })
+    );
   });
 });
 

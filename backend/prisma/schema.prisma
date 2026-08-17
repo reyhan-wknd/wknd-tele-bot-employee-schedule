@@ -64,6 +64,24 @@ model UserSchedule {
   @@map("user_schedules")
 }
 
+/// Antrean pekerjaan tertunda — sekarang hanya dipakai reminder check-out berantai.
+///
+/// Disimpan di database, bukan `setTimeout`, karena proses ini di-restart tiap deploy dan
+/// timer di memori hilang tanpa jejak beserta reminder orang yang sudah check-in.
+model ScheduledJob {
+  id           Int      @id @default(autoincrement())
+  type         String   @map("type") @db.VarChar(50)
+  telegramId   BigInt   @map("telegram_id")
+  attendanceId Int      @map("attendance_id")
+  runAt        DateTime @map("run_at")
+  status       String   @map("status") @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([status, runAt])
+  @@index([attendanceId])
+  @@map("scheduled_jobs")
+}
+
 /// Hari libur, dikelola manual lewat /manage_holiday.
 ///
 /// `year = 0` berarti berulang tiap tahun (17 Agustus), selain itu berlaku sekali saja

@@ -42,44 +42,16 @@ export async function sendCheckInReminders() {
   console.log(`Reminder check-in: ${users.length} user diperiksa, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
 }
 
-export async function sendCheckOutReminders() {
-  const today = todayWIB();
-  if (weekdayOf(today) === 0 || weekdayOf(today) === 6) {
-    console.log('Reminder check-out: akhir pekan, dilewati');
-    return;
-  }
+// Reminder check-out tidak lagi di sini. Menyapu semua absensi terbuka pada jam tetap
+// membuat yang baru check-in siang ikut ditagih jam 18:00, padahal jam pulangnya belum.
+// Sekarang dijadwalkan per orang saat check-in — lihat services/job-queue.ts.
 
-  const libur = await labelLibur(today);
-  if (libur) {
-    console.log(`Reminder check-out: hari libur (${libur}), dilewati`);
-    return;
-  }
-
-  const attendances = await prisma.attendance.findMany({
-    where: { date: today, checkOut: null },
-  });
-
-  const realNow = new Date();
-  const pesan: PesanMassal[] = attendances
-    .filter((att) => (realNow.getTime() - att.checkIn.getTime()) / (1000 * 60 * 60) >= 8)
-    .map((att) => ({
-      telegramId: att.telegramId,
-      text: '⏰ Reminder: Kamu belum check-out hari ini. Gunakan /check_out untuk absen pulang.',
-    }));
-
-  const hasil = await kirimMassal(bot, pesan);
-  console.log(`Reminder check-out: ${attendances.length} absensi terbuka, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);
-}
-
-// Tetap bisa dijalankan manual: npx tsx src/cron/reminder.ts <checkin|checkout>
+// Tetap bisa dijalankan manual: npx tsx src/cron/reminder.ts checkin
 if (typeof require !== 'undefined' && require.main === module) {
-  const jenis = process.argv[2];
-  const tugas = jenis === 'checkin' ? sendCheckInReminders : jenis === 'checkout' ? sendCheckOutReminders : null;
-
-  if (!tugas) {
-    console.error('Usage: tsx src/cron/reminder.ts <checkin|checkout>');
+  if (process.argv[2] !== 'checkin') {
+    console.error('Usage: tsx src/cron/reminder.ts checkin');
     process.exit(1);
   }
 
-  void tugas().finally(() => prisma.$disconnect());
+  void sendCheckInReminders().finally(() => prisma.$disconnect());
 }

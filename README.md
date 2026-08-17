@@ -23,10 +23,41 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 - Di akhir pekan dan hari libur, check-in tidak ditolak tapi diminta konfirmasi lewat
   tombol dulu — yang memang masuk kerja tetap tercatat. Aturan jam 08:00 tetap mutlak,
   termasuk di akhir pekan
-- `/check_out` — absen pulang (min. jam 18:00 WIB, min. 8 jam setelah check-in)
+- `/check_out` — absen pulang, boleh kapan saja setelah check-in
 - Deteksi cuti otomatis dari Google Calendar: event bertipe **Out of office** — judul tidak diperiksa
 - Satu event Out of office membuat hari itu terhitung cuti penuh, berapa pun durasinya
-- Reminder check-in (09:30, 09:50) dan check-out (18:00, 21:00, 23:00)
+- Reminder check-in jam 09:05, 09:30, dan 09:50
+- Reminder check-out dijadwalkan per orang saat check-in, tepat di ambang jam pulangnya,
+  lalu diulang tiap jam sampai maksimal 23:00 — bukan cron massal pada jam tetap
+
+#### Jam kerja dan ambang check-out
+
+Jam kerja resmi mulai **09:00** dengan istirahat satu jam pada **12:00–13:00**:
+
+```
+mulaiEfektif = max(check-in, 09:00)
+istirahat    = sisa jendela 12:00–13:00 setelah mulaiEfektif, maksimal 60 menit
+ambang       = mulaiEfektif + 8 jam + istirahat
+```
+
+| Check-in | Istirahat | Wajib | Ambang |
+|---|---|---|---|
+| 08:00 | 60m | 9j | 18:00 |
+| 09:30 | 60m | 9j | 18:30 |
+| 12:30 | 30m | 8j30m | 21:00 |
+| 13:00 | 0 | 8j | 21:00 |
+
+Datang lebih pagi tidak memajukan jam pulang. Istirahatnya proporsional, jadi ambangnya
+bersambung — 12:30 dan 13:00 sama-sama berujung 21:00, tanpa celah yang bisa dimanfaatkan
+dengan menggeser check-in beberapa menit.
+
+Check-out sebelum ambang tidak ditolak, hanya diminta konfirmasi lewat tombol.
+
+#### Check-out tidak boleh melewati hari
+
+Jam check-out selalu berada di tanggal check-in, maksimal 23:59. Absensi yang terlanjur
+menyeberang tengah malam dianggap kelupaan: `/check_out` keesokan harinya membuat bot
+menanyakan jam pulang yang sebenarnya, dan user membalas dengan `HH:MM`.
 
 ### Hari Libur
 - `/holiday` — daftar hari libur 365 hari ke depan
@@ -193,14 +224,18 @@ npx tsx src/cron/reminder-wfo.ts weekly
 | Waktu (WIB) | Hari | Fungsi |
 |---|---|---|
 | 08:00 | Senin-Jumat | Cek validitas Google token |
-| 09:30 | Senin-Jumat | Reminder check-in (1) |
-| 09:50 | Senin-Jumat | Reminder check-in (2) |
-| 18:00 | Senin-Jumat | Reminder check-out (1) |
+| 09:05 | Senin-Jumat | Reminder check-in (1) |
+| 09:30 | Senin-Jumat | Reminder check-in (2) |
+| 09:50 | Senin-Jumat | Reminder check-in (3) |
 | 20:00 | Setiap hari | Sync jadwal dari Supabase |
-| 21:00 | Senin-Jumat | Reminder check-out (2) |
 | 21:00 | Senin-Kamis | Reminder WFO besok |
 | 21:00 | Jumat | Reminder jadwal WFO minggu depan |
-| 23:00 | Senin-Jumat | Reminder check-out (3) |
+| tiap menit | Setiap hari | Worker antrean job (reminder check-out) |
+
+Reminder check-out **tidak ada di tabel ini** — ia dijadwalkan per orang saat check-in,
+disimpan di tabel `scheduled_jobs`, lalu diambil worker di atas. Karena lahir dari check-in
+yang nyata dan bukan dari kalender, reminder ini **ikut jalan di akhir pekan dan hari
+libur**, berbeda dari reminder check-in.
 
 ## Deploy Produksi
 
@@ -325,14 +360,16 @@ dari sisi klien.
 │       ├── routes/
 │       │   └── auth.ts           # OAuth endpoints
 │       ├── services/
-│       │   ├── attendance.ts     # Aturan check-in/check-out
+│       │   ├── attendance.ts     # Aturan jam kerja, ambang & batas reminder
 │       │   ├── calendar.ts       # Google Calendar cuti detection
+│       │   ├── holiday.ts        # Akses tabel hari libur
+│       │   ├── job-queue.ts      # Antrean reminder check-out berantai
 │       │   ├── schedule.ts       # Schedule pairing logic
 │       │   ├── supabase.ts       # Supabase data fetch
 │       │   └── user.ts           # Hapus tautan akun + revoke token
 │       └── cron/
 │           ├── check-tokens.ts   # Token validity check
-│           ├── reminder.ts       # Attendance reminders
+│           ├── reminder.ts       # Reminder check-in
 │           ├── reminder-wfo.ts   # WFO reminders
 │           └── sync-schedules.ts # Supabase → MySQL sync
 └── frontend/
