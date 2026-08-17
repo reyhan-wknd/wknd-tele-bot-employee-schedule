@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'vitest';
-import { ambangCheckout, batasReminder, bolehCheckin, bolehCheckout, durasiKerja, selisihJam } from './attendance';
+import {
+  ambangCheckout,
+  batasReminder,
+  bolehCheckin,
+  bolehCheckout,
+  durasiKerja,
+  formatDurasiMenit,
+  selisihJam,
+} from './attendance';
 
 describe('bolehCheckin', () => {
   test('hari kerja setelah jam 08:00 diizinkan', () => {
@@ -117,6 +125,29 @@ describe('batasReminder', () => {
     expect(ambangCheckout(wib('15:00')).ambang <= batasReminder(tanggal)).toBe(true);
     // 16:00 + 8 jam = 24:00, sudah melewati hari — tidak boleh ada reminder.
     expect(ambangCheckout(wib('16:00')).ambang > batasReminder(tanggal)).toBe(true);
+  });
+});
+
+describe('formatDurasiMenit', () => {
+  test('di bawah sejam tetap dalam menit', () => {
+    expect(formatDurasiMenit(1)).toBe('1 menit');
+    expect(formatDurasiMenit(45)).toBe('45 menit');
+    expect(formatDurasiMenit(59)).toBe('59 menit');
+  });
+
+  test('kelipatan jam tidak menyebut menit sama sekali', () => {
+    expect(formatDurasiMenit(60)).toBe('1 jam');
+    expect(formatDurasiMenit(120)).toBe('2 jam');
+  });
+
+  test('lebih dari sejam dipecah jadi jam dan menit', () => {
+    expect(formatDurasiMenit(75)).toBe('1 jam 15 menit');
+    expect(formatDurasiMenit(505)).toBe('8 jam 25 menit');
+  });
+
+  test('nol dan nilai negatif tidak menghasilkan teks aneh', () => {
+    expect(formatDurasiMenit(0)).toBe('0 menit');
+    expect(formatDurasiMenit(-5)).toBe('0 menit');
   });
 });
 

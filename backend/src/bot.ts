@@ -19,7 +19,14 @@ import {
 } from './lib/time';
 import { batalkanReminderCheckout, jadwalkanReminderCheckout } from './services/job-queue';
 import { formatProjects, groupSchedulesByDate } from './lib/schedule';
-import { ambangCheckout, bolehCheckin, bolehCheckout, durasiKerja, selisihJam } from './services/attendance';
+import {
+  ambangCheckout,
+  bolehCheckin,
+  bolehCheckout,
+  durasiKerja,
+  formatDurasiMenit,
+  selisihJam,
+} from './services/attendance';
 import { createBot } from './lib/telegram';
 import { ADMIN_TELEGRAM_IDS, isAdmin } from './config';
 import { parsePerintahKelola, potongMenjadiPesan, TAHUN_BERULANG } from './lib/holiday';
@@ -405,8 +412,9 @@ bot.command('check_out', async (ctx) => {
     const durasi = durasiKerja(selisihJam(hariIni.checkIn, realNow));
     await reply(
       ctx,
-      `⏱️ Baru ${durasi.jam}j ${durasi.menit}m sejak check-in — kurang ${izin.sisaMenit} menit ` +
-        'dari jam kerja seharusnya.\n\nTetap mau check-out sekarang?',
+      `⏱️ Baru ${durasi.jam}j ${durasi.menit}m sejak check-in — kurang ` +
+        `${formatDurasiMenit(izin.sisaMenit ?? 0)} dari jam kerja seharusnya.\n\n` +
+        'Tetap mau check-out sekarang?',
       {
         reply_markup: {
           inline_keyboard: [

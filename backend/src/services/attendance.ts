@@ -98,6 +98,16 @@ export function durasiKerja(jamDesimal: number): { jam: number; menit: number } 
   return menit === 60 ? { jam: jam + 1, menit: 0 } : { jam, menit };
 }
 
+/** "45 menit", "1 jam", "1 jam 15 menit" — menit mentah sulit dibaca begitu lewat sejam. */
+export function formatDurasiMenit(menit: number): string {
+  const total = Math.max(Math.round(menit), 0);
+  if (total < 60) return `${total} menit`;
+
+  const jam = Math.floor(total / 60);
+  const sisa = total % 60;
+  return sisa === 0 ? `${jam} jam` : `${jam} jam ${sisa} menit`;
+}
+
 export function selisihJam(mulai: Date, selesai: Date): number {
   return (selesai.getTime() - mulai.getTime()) / (1000 * 60 * 60);
 }
