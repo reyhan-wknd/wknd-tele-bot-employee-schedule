@@ -120,6 +120,16 @@ export function formatTimeWIB(instant: Date): string {
   });
 }
 
+/** "Sel, 04 Agu" — bentuk pendek untuk satu sel tabel, di mana tanggal panjang tidak muat. */
+export function formatTanggalRingkas(value: Date): string {
+  return value.toLocaleDateString('id-ID', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+  });
+}
+
 /** Tanggal panjang dari nilai date-only — dibaca apa adanya, tanpa digeser zona lagi. */
 export function formatDateOnly(value: Date): string {
   return value.toLocaleDateString('id-ID', {

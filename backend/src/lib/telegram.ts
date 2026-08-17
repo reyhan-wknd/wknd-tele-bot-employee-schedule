@@ -13,6 +13,50 @@ export function createBot(token: string): Telegraf {
   return new Telegraf(token, { telegram: { agent: telegramAgent } });
 }
 
+/**
+ * Tabel sungguhan di Telegram dikirim lewat `sendRichMessage`, bukan `parse_mode`.
+ *
+ * Dua hal yang mudah menjebak, keduanya sudah diuji ke API sungguhan:
+ *   - `<table>` pada parse_mode HTML ditolak ("Unsupported start tag"). Tabel memang
+ *     bukan bagian dari sintaks pesan biasa.
+ *   - `sendMessage` yang diberi `rich_message` menjawab ok=true tapi membuangnya diam-diam.
+ *     Balikannya tidak memuat `rich_message`, jadi ok=true bukan bukti apa pun.
+ */
+export interface SelTabel {
+  text: string;
+  is_header?: boolean;
+  align?: 'left' | 'center' | 'right';
+  valign?: 'top' | 'middle' | 'bottom';
+}
+
+export interface BlokTabel {
+  type: 'table';
+  cells: SelTabel[][];
+  caption?: string;
+  is_bordered?: boolean;
+}
+
+/**
+ * Telegraf 4.16.3 belum mengenal `sendRichMessage`, dan `callApi` bertipe
+ * `M extends keyof Telegram` sehingga nama method baru tidak lolos typecheck.
+ *
+ * Cast-nya sengaja dikurung di satu tempat ini saja. Transportnya tetap lewat Telegraf
+ * supaya agen IPv4 di atas dan penanganan errornya tidak ikut hilang — memanggil `fetch`
+ * mentah akan melepas agen itu, padahal ia dipasang justru karena panggilan Telegram
+ * pernah menggantung di host dual-stack.
+ */
+export async function kirimTabel(bot: Telegraf, chatId: bigint | number, blok: BlokTabel): Promise<void> {
+  const kirim = bot.telegram.callApi as unknown as (
+    metode: string,
+    payload: Record<string, unknown>
+  ) => Promise<unknown>;
+
+  await kirim.call(bot.telegram, 'sendRichMessage', {
+    chat_id: Number(chatId),
+    rich_message: { blocks: [blok] },
+  });
+}
+
 /** Telegram membatasi sekitar 30 pesan/detik; 60 ms memberi jarak aman. */
 const JEDA_KIRIM_MS = 60;
 

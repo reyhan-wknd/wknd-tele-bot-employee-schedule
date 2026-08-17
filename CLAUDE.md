@@ -116,6 +116,25 @@ ambang       = mulaiEfektif + 8h + istirahat
   justify a container. Because they are born from a real check-in rather than the calendar,
   these reminders **do fire on weekends and holidays**, unlike the check-in reminders.
 
+### Tabel Telegram (`/history`)
+
+Telegram does have **real tables**, but not through `parse_mode`. Two things verified
+against the live API, both easy to get wrong:
+
+- `<table>` under `parse_mode: HTML` is rejected outright — *"Unsupported start tag"*. This
+  is what makes it tempting to conclude tables are impossible. They are not.
+- Tables travel in a separate `rich_message` field and are sent with **`sendRichMessage`**.
+  Passing `rich_message` to plain `sendMessage` returns `ok: true` **and silently drops it** —
+  the returned Message has no `rich_message`. Never treat `ok: true` as proof; inspect the
+  returned object.
+
+Telegraf 4.16.3 does not know this method (`callApi` is typed `M extends keyof Telegram`),
+so `kirimTabel` in `lib/telegram.ts` holds the single cast needed. It deliberately goes
+through Telegraf rather than raw `fetch`, so the IPv4 agent stays in play.
+
+`/history` falls back to a monospace `<pre>` table if the call fails, since older clients
+may not render `rich_message`.
+
 ### Data Sources
 
 - **MySQL** (via Prisma): users, attendances, schedules, user_schedules — local operational data

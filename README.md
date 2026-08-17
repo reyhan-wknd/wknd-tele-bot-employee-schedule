@@ -24,6 +24,7 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
   tombol dulu — yang memang masuk kerja tetap tercatat. Aturan jam 08:00 tetap mutlak,
   termasuk di akhir pekan
 - `/check_out` — absen pulang, boleh kapan saja setelah check-in
+- `/history` — riwayat 14 hari terakhir sebagai **tabel Telegram sungguhan**
 - Deteksi cuti otomatis dari Google Calendar: event bertipe **Out of office** — judul tidak diperiksa
 - Satu event Out of office membuat hari itu terhitung cuti penuh, berapa pun durasinya
 - Reminder check-in jam 09:05, 09:30, dan 09:50

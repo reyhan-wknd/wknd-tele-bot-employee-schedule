@@ -27,7 +27,8 @@ import {
   formatDurasiMenit,
   selisihJam,
 } from './services/attendance';
-import { createBot } from './lib/telegram';
+import { createBot, kirimTabel, type SelTabel } from './lib/telegram';
+import { susunBarisRiwayat, type BarisRiwayat } from './lib/riwayat';
 import { ADMIN_TELEGRAM_IDS, isAdmin } from './config';
 import { parsePerintahKelola, potongMenjadiPesan, TAHUN_BERULANG } from './lib/holiday';
 import {
@@ -35,6 +36,7 @@ import {
   daftarUpcoming,
   hapusLibur,
   labelLibur,
+  petaLibur,
   tambahLibur,
   ubahLabelLibur,
 } from './services/holiday';
@@ -197,6 +199,7 @@ bot.command('start', async (ctx) => {
     '/status — cek status\n' +
     '/schedule — jadwal WFO\n' +
     '/holiday — daftar hari libur\n' +
+    '/history — riwayat absensi 14 hari\n' +
     '/check_in — absen masuk\n' +
     '/check_out — absen pulang\n' +
     '/logout — hapus koneksi akun'
@@ -552,6 +555,76 @@ bot.command('logout', async (ctx) => {
   await reply(ctx, `🔓 Akun Google (${user.googleEmail}) berhasil di-unlink.`);
 });
 
+// --- Riwayat ---
+
+const HARI_RIWAYAT = 14;
+const JUDUL_RIWAYAT = `Riwayat Absensi ${HARI_RIWAYAT} Hari Terakhir`;
+
+const KOLOM_RIWAYAT: { judul: string; align: 'left' | 'center' | 'right' }[] = [
+  { judul: 'No', align: 'right' },
+  { judul: 'Tanggal', align: 'left' },
+  { judul: 'Masuk', align: 'center' },
+  { judul: 'Pulang', align: 'center' },
+  { judul: 'Durasi', align: 'left' },
+];
+
+/** Cadangan bila tabel Telegram gagal dikirim: tabel monospace yang isinya sama. */
+function tabelMonospace(baris: readonly BarisRiwayat[]): string {
+  const lebar = [3, 12, 6, 6, 12];
+  const kolom = (nilai: string[]) => nilai.map((v, i) => v.padEnd(lebar[i])).join(' ').trimEnd();
+
+  const isi = [
+    kolom(KOLOM_RIWAYAT.map((k) => k.judul)),
+    '─'.repeat(lebar.reduce((a, b) => a + b, 0) + lebar.length - 1),
+    ...baris.map((b) => kolom([String(b.no), b.tanggal, b.masuk, b.pulang, b.durasi])),
+  ].join('\n');
+
+  return `<b>${JUDUL_RIWAYAT}</b>\n\n<pre>${isi}</pre>`;
+}
+
+bot.command('history', async (ctx) => {
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+
+  const today = todayWIB();
+  const mulai = addDays(today, -(HARI_RIWAYAT - 1));
+  const hari = Array.from({ length: HARI_RIWAYAT }, (_, i) => addDays(mulai, i));
+
+  const [absensi, libur] = await Promise.all([
+    prisma.attendance.findMany({
+      where: { telegramId: sesi.telegramId, date: { gte: mulai, lte: today } },
+      orderBy: { date: 'asc' },
+    }),
+    petaLibur(hari),
+  ]);
+
+  const baris = susunBarisRiwayat({ hari, absensi, libur });
+
+  const cells: SelTabel[][] = [
+    KOLOM_RIWAYAT.map((k) => ({ text: k.judul, is_header: true, align: k.align })),
+    ...baris.map((b) =>
+      [String(b.no), b.tanggal, b.masuk, b.pulang, b.durasi].map((text, i) => ({
+        text,
+        align: KOLOM_RIWAYAT[i].align,
+      }))
+    ),
+  ];
+
+  try {
+    await kirimTabel(bot, sesi.telegramId, {
+      type: 'table',
+      cells,
+      caption: JUDUL_RIWAYAT,
+      is_bordered: true,
+    });
+  } catch (err) {
+    // Klien lama belum tentu mengenal rich_message, dan method ini lebih baru dari
+    // Telegraf — jangan sampai riwayatnya hilang sama sekali karena itu.
+    console.error('Tabel riwayat gagal dikirim, memakai cadangan monospace:', errorMessage(err));
+    await reply(ctx, tabelMonospace(baris), { parse_mode: 'HTML' });
+  }
+});
+
 // --- Hari Libur ---
 
 bot.command('holiday', async (ctx) => {
@@ -633,6 +706,7 @@ const BOT_COMMANDS = [
   { command: 'status', description: 'Cek status verifikasi & absensi hari ini' },
   { command: 'schedule', description: 'Lihat jadwal WFO minggu ini & minggu depan' },
   { command: 'holiday', description: 'Lihat hari libur 365 hari ke depan' },
+  { command: 'history', description: 'Riwayat absensi 14 hari terakhir' },
   { command: 'check_in', description: 'Absen masuk (min. 08:00 WIB)' },
   { command: 'check_out', description: 'Absen pulang (min. 18:00 WIB)' },
 ];

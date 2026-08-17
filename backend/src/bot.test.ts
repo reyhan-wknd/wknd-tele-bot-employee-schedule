@@ -234,7 +234,7 @@ describe('guest hanya boleh /start dan /login', () => {
     expect(prismaTiruan.holiday.findMany).not.toHaveBeenCalled();
   });
 
-  test.each(['/status', '/schedule', '/check_in', '/check_out', '/logout'])(
+  test.each(['/status', '/schedule', '/check_in', '/check_out', '/logout', '/history'])(
     '%s juga ditolak sebelum login',
     async (cmd) => {
       await perintah(cmd);

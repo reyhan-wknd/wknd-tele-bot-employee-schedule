@@ -7,7 +7,7 @@ import {
   type LiburMendatang,
   type TanggalLibur,
 } from '../lib/holiday';
-import { todayWIB } from '../lib/time';
+import { isoDateOf, todayWIB } from '../lib/time';
 
 /**
  * Jumlah entri libur selalu kecil (belasan per tahun), jadi seluruh tabel ditarik lalu
@@ -27,6 +27,24 @@ export async function labelLibur(tanggal: Date = todayWIB()): Promise<string | n
 
 export async function daftarUpcoming(mulai: Date = todayWIB()): Promise<LiburMendatang[]> {
   return libur365Hari(await semuaLibur(), mulai);
+}
+
+/**
+ * Label libur untuk banyak tanggal sekaligus, dikunci isoDate.
+ *
+ * `labelLibur` memuat seluruh tabel tiap panggilan, jadi memanggilnya 14 kali berarti
+ * memuatnya 14 kali. Di sini tabelnya dimuat sekali saja.
+ */
+export async function petaLibur(hari: readonly Date[]): Promise<Map<string, string>> {
+  const rows = await semuaLibur();
+  const peta = new Map<string, string>();
+
+  for (const tanggal of hari) {
+    const cocok = cocokHariLibur(rows, tanggal);
+    if (cocok) peta.set(isoDateOf(tanggal), cocok.label);
+  }
+
+  return peta;
 }
 
 export async function cariLibur(tanggal: TanggalLibur) {
