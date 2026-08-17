@@ -526,22 +526,32 @@ bot.command('status', async (ctx) => {
 
   const today = todayWIB();
 
-  // Kalender Google dipanggil berbarengan dengan query absensi, bukan setelahnya, supaya
-  // /status tidak jadi terasa lebih lambat hanya karena menambah satu pemeriksaan.
-  const [attendance, sedangCuti] = await Promise.all([
+  // Ketiganya dipanggil berbarengan, bukan berurutan, supaya /status tidak jadi terasa
+  // lebih lambat hanya karena menambah pemeriksaan.
+  const [attendance, sedangCuti, libur] = await Promise.all([
     prisma.attendance.findUnique({
       where: { telegramId_date: { telegramId, date: today } },
     }),
     isUserOnLeave(user),
+    labelLibur(today),
   ]);
 
-  // Hanya ditampilkan saat memang cuti. Kegagalan memanggil Google menghasilkan false,
-  // jadi barisnya hilang — bukan menuduh seseorang tidak cuti.
-  const infoCuti = sedangCuti ? '\n\n🌴 Kamu sedang cuti hari ini' : '';
+  const akhirPekan = weekdayOf(today) === 0 || weekdayOf(today) === 6;
+
+  // Tiga alasan berbeda kenapa hari ini boleh tidak absen, dan ketiganya bisa berlaku
+  // bersamaan — cuti pribadi di hari libur yang jatuh di akhir pekan, misalnya.
+  // Hari libur terdaftar mengalahkan sebutan akhir pekan, sama seperti di /history.
+  const keterangan: string[] = [];
+  if (sedangCuti) keterangan.push('🌴 Kamu sedang cuti hari ini');
+  if (libur) keterangan.push(`🎌 Hari ini libur: ${libur}`);
+  else if (akhirPekan) keterangan.push('📅 Hari ini akhir pekan');
+
+  const infoHari = keterangan.length > 0 ? `\n\n${keterangan.join('\n')}` : '';
+  const tidakWajibAbsen = sedangCuti || libur !== null || akhirPekan;
 
   let attendanceInfo = '\n\n📋 Absensi hari ini:\n';
   if (!attendance) {
-    attendanceInfo += sedangCuti ? '  Tidak perlu check-in' : '  Belum check-in';
+    attendanceInfo += tidakWajibAbsen ? '  Tidak perlu check-in' : '  Belum check-in';
   } else {
     attendanceInfo += `  Check-in: ${formatTimeWIB(attendance.checkIn)}`;
     if (attendance.checkOut) {
@@ -553,7 +563,7 @@ bot.command('status', async (ctx) => {
     }
   }
 
-  await reply(ctx, `✅ Akun terverifikasi\n\n📧 ${user.googleEmail}${infoCuti}${attendanceInfo}`);
+  await reply(ctx, `✅ Akun terverifikasi\n\n📧 ${user.googleEmail}${infoHari}${attendanceInfo}`);
 });
 
 bot.command('logout', async (ctx) => {

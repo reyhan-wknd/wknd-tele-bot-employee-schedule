@@ -235,7 +235,7 @@ describe('/status ikut melaporkan status cuti', () => {
     expect(pesan).not.toContain('Belum check-in');
   });
 
-  test('tidak cuti — tidak ada baris cuti sama sekali', async () => {
+  test('hari kerja biasa — tidak ada keterangan apa pun', async () => {
     isUserOnLeave.mockResolvedValue(false);
     prismaTiruan.attendance.findUnique.mockResolvedValue(null);
 
@@ -243,7 +243,64 @@ describe('/status ikut melaporkan status cuti', () => {
 
     const pesan = terkirim.join('\n');
     expect(pesan).not.toContain('cuti');
+    expect(pesan).not.toContain('libur');
     expect(pesan).toContain('Belum check-in');
+  });
+
+  test('hari libur terdaftar disebut, dan check-in tidak lagi dituntut', async () => {
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+    prismaTiruan.holiday.findMany.mockResolvedValue([
+      { year: 0, month: 8, day: 17, label: 'Hari Proklamasi Kemerdekaan R.I.' },
+    ]);
+
+    await perintah('/status');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Hari ini libur: Hari Proklamasi Kemerdekaan R.I.');
+    expect(pesan).toContain('Tidak perlu check-in');
+    expect(pesan).not.toContain('Belum check-in');
+  });
+
+  test('akhir pekan disebut sebagai akhir pekan', async () => {
+    vi.setSystemTime(new Date('2026-08-22T03:00:00Z')); // Sabtu
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+
+    await perintah('/status');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('akhir pekan');
+    expect(pesan).toContain('Tidak perlu check-in');
+  });
+
+  test('hari libur yang jatuh di akhir pekan disebut libur saja, tidak dua-duanya', async () => {
+    vi.setSystemTime(new Date('2026-08-22T03:00:00Z')); // Sabtu
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+    prismaTiruan.holiday.findMany.mockResolvedValue([
+      { year: 2026, month: 8, day: 22, label: 'Libur khusus' },
+    ]);
+
+    await perintah('/status');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Hari ini libur: Libur khusus');
+    expect(pesan).not.toContain('akhir pekan');
+  });
+
+  test('cuti dan hari libur bersamaan disebut dua-duanya', async () => {
+    isUserOnLeave.mockResolvedValue(true);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+    prismaTiruan.holiday.findMany.mockResolvedValue([
+      { year: 0, month: 8, day: 17, label: 'Hari Kemerdekaan' },
+    ]);
+
+    await perintah('/status');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('sedang cuti hari ini');
+    expect(pesan).toContain('Hari ini libur: Hari Kemerdekaan');
   });
 
   test('cuti tapi terlanjur check-in — absensinya tetap ditampilkan apa adanya', async () => {
