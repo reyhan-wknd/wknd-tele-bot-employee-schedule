@@ -728,7 +728,7 @@ const BOT_COMMANDS = [
   { command: 'holiday', description: 'Lihat hari libur 365 hari ke depan' },
   { command: 'history', description: 'Riwayat absensi 14 hari terakhir' },
   { command: 'check_in', description: 'Absen masuk (min. 08:00 WIB)' },
-  { command: 'check_out', description: 'Absen pulang (min. 18:00 WIB)' },
+  { command: 'check_out', description: 'Absen pulang' },
 ];
 
 /** Menu admin: sama seperti di atas, ditambah pengelolaan hari libur. */
