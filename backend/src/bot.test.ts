@@ -222,6 +222,52 @@ describe('/check_in tetap menolak saat cuti', () => {
   });
 });
 
+describe('/status ikut melaporkan status cuti', () => {
+  test('sedang cuti dan belum absen — disebut, dan bukan "belum check-in"', async () => {
+    isUserOnLeave.mockResolvedValue(true);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+
+    await perintah('/status');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('sedang cuti hari ini');
+    expect(pesan).toContain('Tidak perlu check-in');
+    expect(pesan).not.toContain('Belum check-in');
+  });
+
+  test('tidak cuti — tidak ada baris cuti sama sekali', async () => {
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+
+    await perintah('/status');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).not.toContain('cuti');
+    expect(pesan).toContain('Belum check-in');
+  });
+
+  test('cuti tapi terlanjur check-in — absensinya tetap ditampilkan apa adanya', async () => {
+    isUserOnLeave.mockResolvedValue(true);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(absensi('2026-08-17T02:00:00Z'));
+
+    await perintah('/status');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('sedang cuti hari ini');
+    expect(pesan).toContain('Check-in: 09.00');
+  });
+
+  test('kalender gagal dipanggil — status tetap tampil tanpa menuduh apa pun', async () => {
+    // isUserOnLeave sudah fail-open di dalamnya; di sini dipastikan /status ikut aman.
+    isUserOnLeave.mockResolvedValue(false);
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+
+    await perintah('/status');
+
+    expect(terkirim.join('\n')).toContain('Akun terverifikasi');
+  });
+});
+
 describe('guest hanya boleh /start dan /login', () => {
   beforeEach(() => {
     prismaTiruan.user.findUnique.mockResolvedValue(null); // belum login

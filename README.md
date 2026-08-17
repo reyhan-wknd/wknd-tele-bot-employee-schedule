@@ -16,7 +16,7 @@ Menghubungkan identitas Telegram user dengan akun Google melalui OAuth 2.0 mengg
 ### Google SSO
 - `/login` — verifikasi akun Google via Mini App
 - `/logout` — hapus koneksi akun
-- `/status` — cek status verifikasi + absensi hari ini
+- `/status` — cek status verifikasi + absensi + status cuti hari ini
 
 ### Absensi
 - `/check_in` — absen masuk (min. jam 08:00 WIB, bukan cuti)

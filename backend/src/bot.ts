@@ -525,13 +525,23 @@ bot.command('status', async (ctx) => {
   const { telegramId, user } = sesi;
 
   const today = todayWIB();
-  const attendance = await prisma.attendance.findUnique({
-    where: { telegramId_date: { telegramId, date: today } },
-  });
+
+  // Kalender Google dipanggil berbarengan dengan query absensi, bukan setelahnya, supaya
+  // /status tidak jadi terasa lebih lambat hanya karena menambah satu pemeriksaan.
+  const [attendance, sedangCuti] = await Promise.all([
+    prisma.attendance.findUnique({
+      where: { telegramId_date: { telegramId, date: today } },
+    }),
+    isUserOnLeave(user),
+  ]);
+
+  // Hanya ditampilkan saat memang cuti. Kegagalan memanggil Google menghasilkan false,
+  // jadi barisnya hilang — bukan menuduh seseorang tidak cuti.
+  const infoCuti = sedangCuti ? '\n\n🌴 Kamu sedang cuti hari ini' : '';
 
   let attendanceInfo = '\n\n📋 Absensi hari ini:\n';
   if (!attendance) {
-    attendanceInfo += '  Belum check-in';
+    attendanceInfo += sedangCuti ? '  Tidak perlu check-in' : '  Belum check-in';
   } else {
     attendanceInfo += `  Check-in: ${formatTimeWIB(attendance.checkIn)}`;
     if (attendance.checkOut) {
@@ -543,7 +553,7 @@ bot.command('status', async (ctx) => {
     }
   }
 
-  await reply(ctx, `✅ Akun terverifikasi\n\n📧 ${user.googleEmail}${attendanceInfo}`);
+  await reply(ctx, `✅ Akun terverifikasi\n\n📧 ${user.googleEmail}${infoCuti}${attendanceInfo}`);
 });
 
 bot.command('logout', async (ctx) => {
@@ -703,7 +713,7 @@ const BOT_COMMANDS = [
   { command: 'start', description: 'Lihat daftar perintah' },
   { command: 'login', description: 'Hubungkan akun Google' },
   { command: 'logout', description: 'Hapus koneksi akun Google' },
-  { command: 'status', description: 'Cek status verifikasi & absensi hari ini' },
+  { command: 'status', description: 'Cek status verifikasi, absensi & cuti hari ini' },
   { command: 'schedule', description: 'Lihat jadwal WFO minggu ini & minggu depan' },
   { command: 'holiday', description: 'Lihat hari libur 365 hari ke depan' },
   { command: 'history', description: 'Riwayat absensi 14 hari terakhir' },
