@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Avatar bot — WKND Absensi</title><style>
+  /* ── Yang bisa diubah lewat CSS ──────────────────────────────────────────── */
+  :root{
+    --kuning: #E8B45F;   /* jarum pendek (jam) */
+    --putih:  #F4FCF8;   /* jarum panjang (menit) */
+    --huruf:  #CDEBDD;
+    --tebal:  9;         /* tebal kedua jarum */
+  }
+
+  /* ── Yang HARUS diubah di atribut d pada <path> di bawah ──────────────────
+     Koordinat tidak bisa memakai variabel CSS, jadi poros jarum disunting
+     langsung di path-nya. Keduanya wajib memakai titik awal yang sama.
+
+       d="M<poros> L<ujung>"     viewBox 100×100, pusat lingkaran = 50,50
+
+     Makin dekat poros ke 50,50 makin terbaca sebagai jam; makin ke bawah
+     makin terbaca sebagai centang.                                          */
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:512px;height:512px;overflow:hidden}
+  /* Warna memenuhi seluruh bidang: Telegram memotongnya jadi lingkaran, dan di
+     tempat lain gambar ini bisa muncul sebagai kotak. Dua-duanya harus utuh. */
+  body{background:radial-gradient(circle at 32% 26%, #26856C, #16543E 76%);
+       display:grid;place-items:center}
+
+  .jarum{fill:none; stroke-width:var(--tebal); stroke-linecap:round}
+  .menit{stroke:var(--putih)}
+  .jam  {stroke:var(--kuning)}
+  .penanda{stroke:var(--huruf); stroke-width:2.4; stroke-linecap:round; opacity:.42}
+  .huruf{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:13px; font-weight:800; letter-spacing:-.02em;
+    fill:var(--huruf); opacity:.62;
+  }
+</style></head><body>
+  <svg width="512" height="512" viewBox="0 0 100 100">
+    <!-- Penanda diagonal tetap garis: 1:30, 4:30, 7:30, 10:30 -->
+    <g class="penanda">
+      <line x1="76.9" y1="23.1" x2="72.7" y2="27.3"/>
+      <line x1="76.9" y1="76.9" x2="72.7" y2="72.7"/>
+      <line x1="23.1" y1="76.9" x2="27.3" y2="72.7"/>
+      <line x1="23.1" y1="23.1" x2="27.3" y2="27.3"/>
+    </g>
+
+    <!-- Hanya posisi kardinal yang jadi huruf: W di 12, K di 3, N di 6, D di 9 -->
+    <g class="huruf" text-anchor="middle" dominant-baseline="central">
+      <text x="50" y="19">W</text>
+      <text x="81" y="50">K</text>
+      <text x="50" y="81">N</text>
+      <text x="19" y="50">D</text>
+    </g>
+
+    <!-- poros 47,56 · jarum panjang -->
+    <path class="jarum menit" d="M47 56 L71 33"/>
+    <!-- poros 47,56 · jarum pendek -->
+    <path class="jarum jam"   d="M47 56 L34 45"/>
+  </svg>
+</body></html>

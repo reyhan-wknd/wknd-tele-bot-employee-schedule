@@ -1,0 +1,63 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 640px; height: 360px; overflow: hidden; }
+  body {
+    background: #0E1210;
+    background-image: radial-gradient(38rem 20rem at 12% -18%, rgba(95,191,161,.20), transparent 68%);
+    color: #E9EEEA;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    display: flex; flex-direction: column;
+    padding: 32px 36px;
+    gap: 16px;
+    justify-content: center;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace; }
+
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    font-size: 13px; letter-spacing: .2em; text-transform: uppercase;
+    color: #8FD6BE;
+  }
+
+  h1 {
+    font-size: 35px; line-height: 1.08; letter-spacing: -.032em; font-weight: 800;
+    max-width: 430px;
+  }
+  h1 span { color: #8A958F; }
+
+  .thread { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+  .bubble {
+    padding: 12px 18px; border-radius: 16px; font-size: 20px; line-height: 1.4;
+    max-width: 460px; width: fit-content;
+  }
+  .kamu {
+    align-self: flex-end;
+    background: #14302A; border: 1px solid #5FBFA1; color: #8FD6BE;
+    border-bottom-right-radius: 6px;
+    font-family: ui-monospace, "SF Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    font-size: 19px;
+  }
+  .bot {
+    background: #1C2320; border: 1px solid #253029; border-bottom-left-radius: 5px;
+  }
+  .bot .detail {
+    display: block; margin-top: 6px; font-size: 17px;
+    font-family: ui-monospace, "SF Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    color: #C1CBC5;
+  }
+  .jam { color: #E0A45C; font-weight: 700; }
+</style></head>
+<body>
+  <div class="eyebrow">Weekend Inc · Bot Absensi</div>
+  <h1>Absen tanpa pindah aplikasi.<br><span>Cukup satu chat.</span></h1>
+
+  <div class="thread">
+    <div class="bubble kamu">/check_in</div>
+    <div class="bubble bot">
+      ✅ Check-in berhasil!
+      <span class="detail">🕐 08.52 &nbsp;·&nbsp; Jam pulang: <span class="jam">18.00</span></span>
+    </div>
+  </div>
+</body></html>

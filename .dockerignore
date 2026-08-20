@@ -21,3 +21,6 @@ nohup.out
 *.sql
 *.sql.gz
 *.dump
+
+# Aset profil bot dipasang manual lewat BotFather, tidak dipakai saat runtime.
+assets
