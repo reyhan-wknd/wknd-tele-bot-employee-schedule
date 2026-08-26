@@ -53,6 +53,21 @@ Tetap mau check-out sekarang?
 
 Kalau memang perlu pulang lebih awal, tekan **Ya** dan absensimu tetap tercatat.
 
+Kalau besok ada yang perlu disiapkan — jadwal WFO, cuti, atau hari libur — bot ikut
+menyebutnya di pesan check-out:
+
+```
+✅ Check-out berhasil!
+
+🕐 18.05
+⏱️ Durasi kerja: 9j 5m
+
+📅 Besok (Selasa, 18 Agustus 2026):
+  🏢 WFO — PPA, Prismalink
+```
+
+Kalau besok hari kerja WFH biasa, tidak ada tambahan apa-apa.
+
 ---
 
 ## Bagaimana jam pulang dihitung
@@ -66,14 +81,14 @@ lebih cepat — check-in jam 08:00 maupun 08:45, jam pulangmu tetap 18:00.
 istirahat, jatah istirahatmu ikut berkurang sesuai sisanya.
 
 | Check-in | Jam pulang |
-|---|---|
-| 08:00 | 18:00 |
-| 08:45 | 18:00 |
-| 09:30 | 18:30 |
-| 11:00 | 20:00 |
-| 12:30 | 21:00 |
-| 13:00 | 21:00 |
-| 14:00 | 22:00 |
+| -------- | ---------- |
+| 08:00    | 18:00      |
+| 08:45    | 18:00      |
+| 09:30    | 18:30      |
+| 11:00    | 20:00      |
+| 12:30    | 21:00      |
+| 13:00    | 21:00      |
+| 14:00    | 22:00      |
 
 Perhatikan dua baris terakhir sebelum 14:00: mulai 12:30 dan mulai 13:00 sama-sama pulang
 21:00. Yang mulai 12:30 masih kebagian 30 menit istirahat, yang mulai 13:00 sudah tidak
@@ -113,6 +128,7 @@ akan terbaca; yang menentukan adalah tipe eventnya.
 Satu event Out of office membuat hari itu terhitung cuti penuh, berapa pun durasinya.
 
 Saat kamu cuti:
+
 - Bot tidak menagihmu check-in
 - `/check_in` ditolak dengan penjelasan
 - `/status` menampilkannya
@@ -153,13 +169,13 @@ Jadwal WFO-mu minggu ini dan minggu depan, lengkap dengan nama project.
 
 Tabel riwayat absensi 14 hari terakhir:
 
-| No | Tanggal | Masuk | Pulang | Durasi |
-|---|---|---|---|---|
-| 1 | Sel, 04 Agu | 08.58 | 18.03 | 9j 5m |
-| 2 | Rab, 05 Agu | 09.12 | — | Berjalan |
-| 3 | Kam, 06 Agu | — | — | Tidak absen |
-| 4 | Jum, 07 Agu | — | — | Libur |
-| 5 | Sab, 08 Agu | — | — | Akhir pekan |
+| No  | Tanggal     | Masuk | Pulang | Durasi      |
+| --- | ----------- | ----- | ------ | ----------- |
+| 1   | Sel, 04 Agu | 08.58 | 18.03  | 9j 5m       |
+| 2   | Rab, 05 Agu | 09.12 | —      | Berjalan    |
+| 3   | Kam, 06 Agu | —     | —      | Tidak absen |
+| 4   | Jum, 07 Agu | —     | —      | Libur       |
+| 5   | Sab, 08 Agu | —     | —      | Akhir pekan |
 
 Semua 14 hari selalu ditampilkan, termasuk yang kosong — supaya hari yang terlewat
 kelihatan.
@@ -188,17 +204,17 @@ pengingatnya tidak datang berbarengan untuk semua orang.
 
 ## Daftar perintah
 
-| Perintah | Fungsi |
-|---|---|
-| `/start` | Lihat daftar perintah |
-| `/login` | Hubungkan akun Google |
-| `/status` | Keadaan hari ini: absensi, cuti, libur |
-| `/check_in` | Absen masuk |
-| `/check_out` | Absen pulang |
-| `/schedule` | Jadwal WFO minggu ini & depan |
-| `/history` | Riwayat absensi 14 hari |
-| `/holiday` | Hari libur 365 hari ke depan |
-| `/logout` | Putuskan koneksi akun Google |
+| Perintah     | Fungsi                                 |
+| ------------ | -------------------------------------- |
+| `/start`     | Lihat daftar perintah                  |
+| `/login`     | Hubungkan akun Google                  |
+| `/status`    | Keadaan hari ini: absensi, cuti, libur |
+| `/check_in`  | Absen masuk                            |
+| `/check_out` | Absen pulang                           |
+| `/schedule`  | Jadwal WFO minggu ini & depan          |
+| `/history`   | Riwayat absensi 14 hari                |
+| `/holiday`   | Hari libur 365 hari ke depan           |
+| `/logout`    | Putuskan koneksi akun Google           |
 
 ---
 

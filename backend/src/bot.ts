@@ -3,7 +3,7 @@ import type { Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import type { Express } from 'express';
 import { prisma } from './db';
-import { isUserOnLeave } from './services/calendar';
+import { isUserOnLeave, type UserToken } from './services/calendar';
 import { getUserPairing, pairUserByEmail } from './services/schedule';
 import { unlinkUser } from './services/user';
 import {
@@ -17,6 +17,7 @@ import {
   todayWIB,
   weekdayOf,
 } from './lib/time';
+import { infoBesok } from './services/besok';
 import { batalkanReminderCheckout, jadwalkanReminderCheckout } from './services/job-queue';
 import { formatProjects, groupSchedulesByDate } from './lib/schedule';
 import {
@@ -379,10 +380,26 @@ function ringkasanCheckout(checkIn: Date, checkOut: Date, tanggal?: Date): strin
   return `✅ Check-out berhasil!\n\n🕐 ${formatTimeWIB(checkOut)}\n⏱️ Durasi kerja: ${durasi.jam}j ${durasi.menit}m${keterangan}`;
 }
 
+/**
+ * Pesan check-out lengkap: ringkasannya, lalu keadaan besok kalau ada yang perlu disiapkan.
+ *
+ * `user` boleh null supaya jalur balasan jam manual tetap bisa memakai fungsi yang sama
+ * ketika baris user-nya sudah tidak ada — tanpa keadaan besok, bukan tanpa pesan.
+ */
+async function pesanCheckout(
+  user: UserToken | null,
+  checkIn: Date,
+  checkOut: Date,
+  tanggal?: Date
+): Promise<string> {
+  const besok = user ? await infoBesok(user) : null;
+  return ringkasanCheckout(checkIn, checkOut, tanggal) + (besok ? `\n\n${besok}` : '');
+}
+
 bot.command('check_out', async (ctx) => {
   const sesi = await requireUser(ctx);
   if (!sesi) return;
-  const { telegramId } = sesi;
+  const { telegramId, user } = sesi;
 
   const today = todayWIB();
 
@@ -433,7 +450,7 @@ bot.command('check_out', async (ctx) => {
   }
 
   await tutupAbsensi(hariIni.id, realNow);
-  await reply(ctx, ringkasanCheckout(hariIni.checkIn, realNow));
+  await reply(ctx, await pesanCheckout(user, hariIni.checkIn, realNow));
 });
 
 /**
@@ -482,7 +499,7 @@ bot.action(/^co:(ok|batal):(\d+)$/, async (ctx) => {
 
   const realNow = new Date();
   await tutupAbsensi(absensi.id, realNow);
-  await selesai(ringkasanCheckout(absensi.checkIn, realNow));
+  await selesai(await pesanCheckout(sesi.user, absensi.checkIn, realNow));
 });
 
 /**
@@ -516,7 +533,10 @@ bot.on(message('text'), async (ctx, next) => {
   }
 
   await tutupAbsensi(tertinggal.id, checkOut);
-  await reply(ctx, ringkasanCheckout(tertinggal.checkIn, checkOut, tertinggal.date));
+  // Barisnya baru diambil di sini: jalur ini tidak lewat requireUser, dan sebelum absensinya
+  // benar-benar ditutup belum ada gunanya.
+  const user = await prisma.user.findUnique({ where: { telegramId } });
+  await reply(ctx, await pesanCheckout(user, tertinggal.checkIn, checkOut, tertinggal.date));
 });
 
 bot.command('status', async (ctx) => {

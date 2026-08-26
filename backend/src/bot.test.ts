@@ -59,6 +59,9 @@ beforeEach(() => {
   prismaTiruan.scheduledJob.create.mockResolvedValue({ id: 1 });
   prismaTiruan.scheduledJob.updateMany.mockResolvedValue({ count: 0 });
   prismaTiruan.scheduledJob.findMany.mockResolvedValue([]);
+  // Bawaannya belum terpasang ke data karyawan, jadi tidak ada jadwal WFO yang ikut disebut.
+  prismaTiruan.userSchedule.findUnique.mockResolvedValue(null);
+  prismaTiruan.schedule.findMany.mockResolvedValue([]);
   // Senin, 17 Agustus 2026, 11:00 WIB — hari kerja, sebelum jam pulang.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-08-17T04:00:00Z'));
@@ -121,7 +124,11 @@ describe('/check_out saat user mendadak cuti', () => {
 
     expect(prismaTiruan.attendance.update).toHaveBeenCalledOnce();
     expect(terkirim.join('\n')).toContain('Check-out berhasil');
-    expect(isUserOnLeave).not.toHaveBeenCalled(); // status cuti tidak ikut diperiksa
+    // Kalender memang tersentuh, tapi untuk keadaan besok — bukan sebagai gerbang hari ini.
+    // Kalau ia dipakai sebagai gerbang, absensinya tidak akan tertutup di atas.
+    expect((isUserOnLeave.mock.calls[0]?.[1] as Date | undefined)?.toISOString()).toBe(
+      '2026-08-18T05:00:00.000Z' // tengah hari WIB besok
+    );
   });
 
   test('belum genap jam kerja minta konfirmasi, bukan ditolak karena jam', async () => {
@@ -196,6 +203,98 @@ describe('/check_out untuk absensi yang terlewat', () => {
     expect(prismaTiruan.scheduledJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { attendanceId: 77, status: 'pending' } })
     );
+  });
+});
+
+describe('/check_out menyebutkan keadaan besok', () => {
+  /** Sudah lewat jam pulang, jadi check-out langsung tercatat tanpa tombol konfirmasi. */
+  const sudahJamPulang = () => {
+    prismaTiruan.attendance.findUnique.mockResolvedValue(absensi('2026-08-17T02:00:00Z'));
+    vi.setSystemTime(new Date('2026-08-17T11:30:00Z')); // 18:30 WIB
+  };
+
+  const jadwalBesok = (...projects: string[]) => {
+    prismaTiruan.userSchedule.findUnique.mockResolvedValue({
+      telegramId: USER.telegramId,
+      employeeNik: 'NIK1',
+    });
+    prismaTiruan.schedule.findMany.mockResolvedValue(
+      projects.map((projectName) => ({ date: new Date('2026-08-18T00:00:00.000Z'), projectName }))
+    );
+  };
+
+  beforeEach(() => {
+    isUserOnLeave.mockResolvedValue(false);
+    sudahJamPulang();
+  });
+
+  test('jadwal WFO besok ikut disebut beserta projectnya', async () => {
+    jadwalBesok('PPA', 'Prismalink');
+
+    await perintah('/check_out');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Check-out berhasil');
+    expect(pesan).toContain('Besok (Selasa, 18 Agustus 2026)');
+    expect(pesan).toContain('WFO — PPA, Prismalink');
+    expect(prismaTiruan.schedule.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { employeeNik: 'NIK1', date: new Date('2026-08-18T00:00:00.000Z') },
+      })
+    );
+  });
+
+  test('besok hari kerja WFH biasa — pesannya tetap seperti sebelumnya', async () => {
+    await perintah('/check_out');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Check-out berhasil');
+    expect(pesan).not.toContain('Besok');
+  });
+
+  test('besok hari libur disebut beserta labelnya', async () => {
+    prismaTiruan.holiday.findMany.mockResolvedValue([
+      { year: 2026, month: 8, day: 18, label: 'Cuti bersama' },
+    ]);
+
+    await perintah('/check_out');
+
+    expect(terkirim.join('\n')).toContain('Libur: Cuti bersama');
+  });
+
+  test('cuti besok disebut, dan bukan cuti hari ini yang diperiksa', async () => {
+    isUserOnLeave.mockResolvedValue(true);
+
+    await perintah('/check_out');
+
+    expect(terkirim.join('\n')).toContain('Kamu cuti');
+  });
+
+  test('jadwal yang gagal diambil tidak menjatuhkan pesan check-out', async () => {
+    prismaTiruan.userSchedule.findUnique.mockRejectedValue(new Error('MySQL sedang mati'));
+
+    await perintah('/check_out');
+
+    const pesan = terkirim.join('\n');
+    expect(prismaTiruan.attendance.update).toHaveBeenCalledOnce();
+    expect(pesan).toContain('Check-out berhasil');
+    expect(pesan).not.toContain('Besok');
+  });
+
+  test('absensi terlewat yang ditutup lewat balasan jam juga menyebut besok', async () => {
+    jadwalBesok('PPA');
+    prismaTiruan.attendance.findUnique.mockResolvedValue(null);
+    prismaTiruan.attendance.findFirst.mockResolvedValue({
+      ...absensi('2026-08-16T02:00:00Z'),
+      id: 77,
+      date: new Date('2026-08-16T00:00:00.000Z'),
+    });
+
+    await balasanKeBot('17:30');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Check-out berhasil');
+    expect(pesan).toContain('WFO — PPA');
   });
 });
 
