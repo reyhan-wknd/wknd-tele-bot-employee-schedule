@@ -1,5 +1,14 @@
 import { prisma } from '../db';
+import type { RentangDuaMinggu } from '../lib/schedule';
 import { findEmployeeByEmail, type EmployeeRecord } from './supabase';
+
+/** Jadwal WFO satu karyawan pada jendela dua minggu, terurut tanggal. */
+export async function ambilJadwalDuaMinggu(employeeNik: string, rentang: RentangDuaMinggu) {
+  return prisma.schedule.findMany({
+    where: { employeeNik, date: { gte: rentang.mulai, lte: rentang.selesai } },
+    orderBy: { date: 'asc' },
+  });
+}
 
 export async function pairUserSchedule(telegramId: bigint, employeeNik: string): Promise<void> {
   await prisma.userSchedule.upsert({

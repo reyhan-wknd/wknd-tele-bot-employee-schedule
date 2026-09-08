@@ -165,6 +165,40 @@ perlu absen (cuti, hari libur, atau akhir pekan).
 
 Jadwal WFO-mu minggu ini dan minggu depan, lengkap dengan nama project.
 
+### `/schedule_of <nama>` — jadwal WFO rekan kerja
+
+Untuk tahu siapa saja yang ke kantor. Cukup sebagian nama, minimal 3 huruf:
+
+```
+/schedule_of budi
+
+👤 Budi Santoso — QA Engineer
+
+📍 Hari ini: 🏢 WFO (PPA)
+
+📌 Minggu ini:
+  • Senin, 8 September 2026 — PPA
+  • Rabu, 10 September 2026 — PPA, Prismalink
+
+📌 Minggu depan:
+  • Selasa, 15 September 2026 — PPA
+```
+
+Kalau namanya cocok dengan beberapa orang, bot menampilkan tombol pilihan — tekan salah
+satu dan jadwalnya langsung menggantikan daftar tadi. Kalau ada lebih dari delapan yang
+cocok, ketik namanya lebih lengkap.
+
+Salah ketik pun masih tertolong: `/schedule_of budhi` akan menawarkan **"Maksud kamu:
+Budi Santoso?"** sebagai tombol.
+
+Beberapa hal yang perlu diketahui:
+
+- **Jadwalmu sendiri tidak muncul di sini** — pakai `/schedule`.
+- Yang ditampilkan **hanya jadwal WFO**. Absensi dan cuti orang lain tidak ikut terlihat.
+- **Tidak ada jadwal WFO bukan berarti orangnya WFH.** Bisa saja dia cuti, atau jadwal
+  minggu depan memang belum terbit. Karena itu bot menulis "tidak ada jadwal WFO
+  terdaftar", bukan "WFH".
+
 ### `/history` — riwayat 14 hari
 
 Tabel riwayat absensi 14 hari terakhir:
@@ -212,6 +246,7 @@ pengingatnya tidak datang berbarengan untuk semua orang.
 | `/check_in`  | Absen masuk                            |
 | `/check_out` | Absen pulang                           |
 | `/schedule`  | Jadwal WFO minggu ini & depan          |
+| `/schedule_of <nama>` | Jadwal WFO rekan kerja        |
 | `/history`   | Riwayat absensi 14 hari                |
 | `/holiday`   | Hari libur 365 hari ke depan           |
 | `/logout`    | Putuskan koneksi akun Google           |
@@ -232,6 +267,10 @@ bukan acara biasa, dan berada di kalender utamamu.
 
 **Hari libur belum terdaftar** — daftar hari libur dikelola manual oleh admin, terutama untuk
 cuti bersama yang baru diumumkan. Hubungi admin agar ditambahkan.
+
+**"Tidak ada karyawan bernama …"** — nama dicari dari data karyawan aktif di sistem HR.
+Coba potongan nama yang lain (nama belakang juga bisa), dan kalau tetap tidak ketemu
+padahal orangnya ada, hubungi admin.
 
 Bot ini hanya bisa dipakai lewat **chat pribadi**. Di grup, semua perintah akan ditolak agar
 data absensi dan email tidak bocor ke orang lain.

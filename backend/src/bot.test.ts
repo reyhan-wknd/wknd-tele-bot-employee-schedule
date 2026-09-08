@@ -13,7 +13,7 @@ const prismaTiruan = {
   user: { findUnique: vi.fn() },
   attendance: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   schedule: { findMany: vi.fn() },
-  userSchedule: { findUnique: vi.fn() },
+  userSchedule: { findUnique: vi.fn(), upsert: vi.fn() },
   holiday: { findMany: vi.fn() },
   scheduledJob: { create: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
 };
@@ -21,6 +21,15 @@ vi.mock('./db', () => ({ prisma: prismaTiruan }));
 
 const isUserOnLeave = vi.fn();
 vi.mock('./services/calendar', () => ({ isUserOnLeave }));
+
+const fetchActiveEmployees = vi.fn();
+const findEmployeeByNik = vi.fn();
+const findEmployeeByEmail = vi.fn();
+vi.mock('./services/supabase', () => ({
+  fetchActiveEmployees,
+  findEmployeeByNik,
+  findEmployeeByEmail,
+}));
 
 const USER = {
   telegramId: 839050319n,
@@ -31,6 +40,10 @@ const USER = {
 
 let bot: import('telegraf').Telegraf;
 let terkirim: string[];
+/** Teks hasil editMessageText — bukti bahwa tombolnya ikut hilang saat dijawab. */
+let disunting: string[];
+/** Susunan inline keyboard dari tiap pesan bertombol yang dikirim. */
+let tombolTerkirim: { text: string; callback_data?: string }[][][];
 
 beforeAll(async () => {
   vi.stubEnv('BOT_TOKEN', '123:token-uji');
@@ -44,10 +57,24 @@ afterAll(() => vi.unstubAllEnvs());
 
 beforeEach(() => {
   terkirim = [];
+  disunting = [];
+  tombolTerkirim = [];
   // Disadap di prototipe, bukan di bot.telegram: handleUpdate membuat instance Telegram
   // baru untuk setiap update, jadi menambal instance yang ada tidak akan kena.
-  vi.spyOn(Telegram.prototype, 'callApi').mockImplementation((async (metode: string, payload: { text?: string }) => {
-    if (metode === 'sendMessage' && payload?.text) terkirim.push(payload.text);
+  vi.spyOn(Telegram.prototype, 'callApi').mockImplementation((async (
+    metode: string,
+    payload: {
+      text?: string;
+      reply_markup?: { inline_keyboard?: { text: string; callback_data?: string }[][] };
+    }
+  ) => {
+    if (metode === 'sendMessage' && payload?.text) {
+      terkirim.push(payload.text);
+      if (payload.reply_markup?.inline_keyboard) {
+        tombolTerkirim.push(payload.reply_markup.inline_keyboard);
+      }
+    }
+    if (metode === 'editMessageText' && payload?.text) disunting.push(payload.text);
     return {};
   }) as never);
 
@@ -82,7 +109,9 @@ const perintah = (text: string) =>
       chat: { id: 839050319, type: 'private' },
       from: { id: 839050319, is_bot: false, first_name: 'Reyhan' },
       text,
-      entities: [{ offset: 0, length: text.length, type: 'bot_command' }],
+      // Entity-nya hanya sepanjang perintahnya sendiri, seperti yang dikirim Telegram —
+      // argumen sesudah spasi bukan bagian dari bot_command.
+      entities: [{ offset: 0, length: text.split(' ')[0].length, type: 'bot_command' }],
     },
   } as never);
 
@@ -102,6 +131,25 @@ const balasanKeBot = (text: string) =>
         chat: { id: 839050319, type: 'private' },
         from: { id: 1, is_bot: true, first_name: 'uji', username: 'uji_bot' },
         text: 'Balas pesan ini dengan jam pulangmu',
+      },
+    },
+  } as never);
+
+/** Penekanan tombol inline — bentuk update yang dikirim Telegram untuk callback_query. */
+const tekanTombol = (data: string) =>
+  bot.handleUpdate({
+    update_id: 3,
+    callback_query: {
+      id: 'cb-1',
+      chat_instance: 'ci-1',
+      from: { id: 839050319, is_bot: false, first_name: 'Reyhan' },
+      data,
+      message: {
+        message_id: 9,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 839050319, type: 'private' },
+        from: { id: 1, is_bot: true, first_name: 'uji', username: 'uji_bot' },
+        text: 'Pilih salah satu:',
       },
     },
   } as never);
@@ -436,13 +484,18 @@ describe('guest hanya boleh /start dan /login', () => {
     expect(prismaTiruan.holiday.findMany).not.toHaveBeenCalled();
   });
 
-  test.each(['/status', '/schedule', '/check_in', '/check_out', '/logout', '/history'])(
-    '%s juga ditolak sebelum login',
-    async (cmd) => {
-      await perintah(cmd);
-      expect(terkirim.join('\n')).toContain('belum terverifikasi');
-    }
-  );
+  test.each([
+    '/status',
+    '/schedule',
+    '/schedule_of budi',
+    '/check_in',
+    '/check_out',
+    '/logout',
+    '/history',
+  ])('%s juga ditolak sebelum login', async (cmd) => {
+    await perintah(cmd);
+    expect(terkirim.join('\n')).toContain('belum terverifikasi');
+  });
 
   test('/start tetap terbuka untuk guest', async () => {
     await perintah('/start');
@@ -535,5 +588,280 @@ describe('/check_in di akhir pekan juga meminta konfirmasi', () => {
 
     expect(prismaTiruan.attendance.create).toHaveBeenCalledOnce();
     expect(terkirim.join('\n')).toContain('Check-in berhasil');
+  });
+});
+
+// --- /schedule_of ---
+
+const karyawan = (employeeNik: string, name: string, jobTitle = 'Engineer') => ({
+  employeeNik,
+  name,
+  jobTitle,
+});
+
+/** Sembilan nama berawalan sama, meniru 13 "Muhammad" di direktori sungguhan. */
+const MUHAMMAD = ['Alif', 'Bagas', 'Candra', 'Dimas', 'Fajar', 'Ilham', 'Rizki', 'Yusuf', 'Zaki'].map(
+  (belakang, i) => karyawan(`2000${i + 1}`, `Muhammad ${belakang}`)
+);
+
+const DIREKTORI = [
+  karyawan('21225', 'Reyhan Ramadhan', 'Backend Developer'), // orang yang mengetik perintahnya
+  karyawan('10001', 'Budi Santoso', 'QA Engineer'),
+  ...MUHAMMAD,
+];
+
+const jadwal = (tanggal: string, projectName: string) => ({
+  date: new Date(`${tanggal}T00:00:00.000Z`),
+  projectName,
+});
+
+const terpasangKe = (employeeNik: string) =>
+  prismaTiruan.userSchedule.findUnique.mockResolvedValue({
+    telegramId: USER.telegramId,
+    employeeNik,
+  });
+
+describe('/schedule_of menampilkan jadwal rekan kerja', () => {
+  beforeEach(() => {
+    fetchActiveEmployees.mockResolvedValue(DIREKTORI);
+    findEmployeeByNik.mockImplementation(
+      async (nik: string) => DIREKTORI.find((k) => k.employeeNik === nik) ?? null
+    );
+  });
+
+  test('satu kecocokan langsung ditampilkan, tanpa tombol', async () => {
+    prismaTiruan.schedule.findMany.mockResolvedValue([
+      jadwal('2026-08-17', 'PPA'),
+      jadwal('2026-08-25', 'NEMO'),
+    ]);
+
+    await perintah('/schedule_of budi');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Budi Santoso — QA Engineer');
+    expect(pesan).toContain('Hari ini: 🏢 WFO (PPA)');
+    expect(pesan).toContain('Senin, 17 Agustus 2026 — PPA');
+    expect(pesan).toContain('Selasa, 25 Agustus 2026 — NEMO');
+    expect(tombolTerkirim).toHaveLength(0);
+    expect(prismaTiruan.schedule.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ employeeNik: '10001' }) })
+    );
+  });
+
+  test('tanpa jadwal WFO tidak pernah diterjemahkan jadi WFH', async () => {
+    prismaTiruan.schedule.findMany.mockResolvedValue([]);
+
+    await perintah('/schedule_of budi');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Budi Santoso — QA Engineer');
+    expect(pesan).toContain('Tidak ada jadwal WFO terdaftar');
+    expect(pesan).not.toContain('WFH');
+    expect(pesan).not.toContain('Day Off');
+  });
+
+  test('hari ini tanpa jadwal tidak memunculkan baris "Hari ini" sama sekali', async () => {
+    prismaTiruan.schedule.findMany.mockResolvedValue([jadwal('2026-08-25', 'NEMO')]);
+
+    await perintah('/schedule_of budi');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).not.toContain('Hari ini');
+    expect(pesan).toContain('Selasa, 25 Agustus 2026 — NEMO');
+  });
+
+  test('banyak kecocokan meminta pilihan dulu, jadwal belum disentuh', async () => {
+    await perintah('/schedule_of muhammad');
+
+    expect(prismaTiruan.schedule.findMany).not.toHaveBeenCalled();
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('9 orang cocok');
+    expect(pesan).toContain('Masih ada 1 lainnya');
+
+    const keyboard = tombolTerkirim[0];
+    expect(keyboard).toHaveLength(9); // delapan nama + tombol batal
+    expect(keyboard[0][0].callback_data).toMatch(/^sof:nik:2000\d$/);
+    expect(keyboard.at(-1)?.[0].callback_data).toBe('sof:batal');
+  });
+
+  test('kecocokan yang muat semua tidak menyebut sisa', async () => {
+    fetchActiveEmployees.mockResolvedValue([...MUHAMMAD.slice(0, 3)]);
+
+    await perintah('/schedule_of muhammad');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('3 orang cocok');
+    expect(pesan).toContain('Pilih salah satu');
+    expect(pesan).not.toContain('Masih ada');
+  });
+
+  test('menekan tombol mengganti pesannya sendiri, jadi tombolnya hilang', async () => {
+    prismaTiruan.schedule.findMany.mockResolvedValue([jadwal('2026-08-17', 'PPA')]);
+
+    await tekanTombol('sof:nik:20001');
+
+    const hasil = disunting.join('\n');
+    expect(hasil).toContain('Muhammad Alif');
+    expect(hasil).toContain('Hari ini: 🏢 WFO (PPA)');
+    expect(terkirim).toHaveLength(0); // jawaban menyunting pesan lama, bukan mengirim yang baru
+    expect(findEmployeeByNik).toHaveBeenCalledWith('20001');
+  });
+
+  test('tombol batal menutup daftar tanpa menampilkan siapa pun', async () => {
+    await tekanTombol('sof:batal');
+
+    expect(disunting.join('\n')).toContain('dibatalkan');
+    expect(prismaTiruan.schedule.findMany).not.toHaveBeenCalled();
+    expect(findEmployeeByNik).not.toHaveBeenCalled();
+  });
+
+  test('NIK yang sudah tidak ada dijawab, bukan ditampilkan kosong', async () => {
+    findEmployeeByNik.mockResolvedValue(null);
+
+    await tekanTombol('sof:nik:99999');
+
+    expect(disunting.join('\n')).toContain('sudah tidak tersedia');
+    expect(prismaTiruan.schedule.findMany).not.toHaveBeenCalled();
+  });
+
+  test('nama sendiri diarahkan ke /schedule, bukan dijawab "tidak ditemukan"', async () => {
+    terpasangKe('21225');
+
+    await perintah('/schedule_of reyhan');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Itu kamu sendiri');
+    expect(pesan).toContain('/schedule');
+    expect(prismaTiruan.schedule.findMany).not.toHaveBeenCalled();
+  });
+
+  test('diri sendiri tidak menghalangi rekan lain yang juga cocok', async () => {
+    terpasangKe('20001'); // si pencari adalah salah satu "Muhammad"
+
+    await perintah('/schedule_of muhammad');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('8 orang cocok');
+    expect(pesan).not.toContain('Itu kamu');
+    expect(tombolTerkirim[0].flat().map((t) => t.callback_data)).not.toContain('sof:nik:20001');
+  });
+
+  test('tombol yang menunjuk diri sendiri tetap ditolak saat ditekan', async () => {
+    terpasangKe('10001');
+
+    await tekanTombol('sof:nik:10001');
+
+    expect(disunting.join('\n')).toContain('Itu kamu sendiri');
+    expect(prismaTiruan.schedule.findMany).not.toHaveBeenCalled();
+  });
+
+  test('typo menawarkan tebakan sebagai tombol', async () => {
+    await perintah('/schedule_of budhi');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('tidak ditemukan');
+    expect(pesan).toContain('Maksud kamu');
+    expect(tombolTerkirim[0][0][0].text).toBe('Budi Santoso');
+    expect(tombolTerkirim[0][0][0].callback_data).toBe('sof:nik:10001');
+    expect(prismaTiruan.schedule.findMany).not.toHaveBeenCalled();
+  });
+
+  test('nama yang sama sekali tidak ada dijawab apa adanya', async () => {
+    await perintah('/schedule_of zzqqxx');
+
+    expect(terkirim.join('\n')).toContain('Tidak ada karyawan bernama');
+    expect(tombolTerkirim).toHaveLength(0);
+  });
+
+  test('tanpa nama, yang muncul cara pakainya', async () => {
+    await perintah('/schedule_of');
+
+    expect(terkirim.join('\n')).toContain('Contoh: /schedule_of budi');
+    expect(fetchActiveEmployees).not.toHaveBeenCalled();
+  });
+
+  test('query dua huruf ditolak sebelum menyentuh Supabase', async () => {
+    await perintah('/schedule_of bu');
+
+    expect(terkirim.join('\n')).toContain('terlalu pendek');
+    expect(fetchActiveEmployees).not.toHaveBeenCalled();
+  });
+
+  test('Supabase mati dijawab pesan biasa, bukan error server', async () => {
+    fetchActiveEmployees.mockRejectedValue(new Error('ETIMEDOUT'));
+
+    await perintah('/schedule_of budi');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('Data karyawan sedang tidak bisa diakses');
+    expect(pesan).not.toContain('kesalahan di sisi server');
+  });
+
+  test('mencari jadwal orang lain tidak pernah membuat pairing baru', async () => {
+    await perintah('/schedule_of budi');
+
+    expect(findEmployeeByEmail).not.toHaveBeenCalled();
+    expect(prismaTiruan.userSchedule.upsert).not.toHaveBeenCalled();
+  });
+
+  test('nama bespasi dicari utuh, bukan cuma kata pertamanya', async () => {
+    prismaTiruan.schedule.findMany.mockResolvedValue([]);
+
+    await perintah('/schedule_of budi santoso');
+
+    expect(terkirim.join('\n')).toContain('Budi Santoso — QA Engineer');
+  });
+});
+
+describe('/schedule tidak berubah setelah logikanya dipakai bersama', () => {
+  beforeEach(() => {
+    terpasangKe('NIK1');
+  });
+
+  test('menyebut hari ini, minggu ini, dan minggu depan', async () => {
+    prismaTiruan.schedule.findMany.mockResolvedValue([
+      jadwal('2026-08-17', 'PPA'),
+      jadwal('2026-08-25', 'NEMO'),
+    ]);
+
+    await perintah('/schedule');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('📅 Jadwal WFO kamu:');
+    expect(pesan).toContain('📍 Hari ini: 🏢 WFO (PPA)');
+    expect(pesan).toContain('📌 Minggu ini:\n  • Senin, 17 Agustus 2026 — PPA');
+    expect(pesan).toContain('📌 Minggu depan:\n  • Selasa, 25 Agustus 2026 — NEMO');
+  });
+
+  test('hari kerja tanpa jadwal tetap disebut WFH', async () => {
+    prismaTiruan.schedule.findMany.mockResolvedValue([]);
+
+    await perintah('/schedule');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('📍 Hari ini: 🏠 WFH');
+    expect(pesan).toContain('📌 Minggu ini:\n  Belum ada jadwal');
+    expect(pesan).toContain('📌 Minggu depan:\n  Belum ada jadwal');
+  });
+
+  test('akhir pekan tanpa jadwal tetap disebut Day Off', async () => {
+    vi.setSystemTime(new Date('2026-08-22T03:00:00Z')); // Sabtu
+    prismaTiruan.schedule.findMany.mockResolvedValue([]);
+
+    await perintah('/schedule');
+
+    expect(terkirim.join('\n')).toContain('📍 Hari ini: 🏖️ Day Off');
+  });
+
+  test('WFO di akhir pekan tetap mengalahkan sebutan Day Off', async () => {
+    vi.setSystemTime(new Date('2026-08-22T03:00:00Z')); // Sabtu
+    prismaTiruan.schedule.findMany.mockResolvedValue([jadwal('2026-08-22', 'PPA')]);
+
+    await perintah('/schedule');
+
+    const pesan = terkirim.join('\n');
+    expect(pesan).toContain('📍 Hari ini: 🏢 WFO (PPA)');
+    expect(pesan).not.toContain('Day Off');
   });
 });

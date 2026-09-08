@@ -4,7 +4,7 @@ import { message } from 'telegraf/filters';
 import type { Express } from 'express';
 import { prisma } from './db';
 import { isUserOnLeave, type UserToken } from './services/calendar';
-import { getUserPairing, pairUserByEmail } from './services/schedule';
+import { ambilJadwalDuaMinggu, getUserPairing, pairUserByEmail } from './services/schedule';
 import { unlinkUser } from './services/user';
 import {
   addDays,
@@ -19,7 +19,16 @@ import {
 } from './lib/time';
 import { infoBesok } from './services/besok';
 import { batalkanReminderCheckout, jadwalkanReminderCheckout } from './services/job-queue';
-import { formatProjects, groupSchedulesByDate } from './lib/schedule';
+import { formatDuaMinggu, formatJadwalOrang, proyekHariIni, rentangDuaMinggu } from './lib/schedule';
+import {
+  cariNama,
+  MAKS_PILIHAN,
+  menunjukDiriSendiri,
+  MIN_HURUF_QUERY,
+  normalisasiNama,
+  type KandidatNama,
+} from './lib/cari-nama';
+import { fetchActiveEmployees, findEmployeeByNik, type EmployeeRecord } from './services/supabase';
 import {
   ambangCheckout,
   bolehCheckin,
@@ -137,56 +146,24 @@ async function showSchedule(ctx: Context, telegramId: bigint, googleEmail: strin
 
   const today = todayWIB();
   const weekday = weekdayOf(today); // 0=Minggu, 6=Sabtu
-  const sunday = addDays(today, -weekday);
-  const saturday = addDays(sunday, 6); // batas minggu ini
-  const nextSaturday = addDays(sunday, 13); // batas minggu depan
-
-  const schedules = await prisma.schedule.findMany({
-    where: {
-      employeeNik,
-      date: { gte: today, lte: nextSaturday },
-    },
-    orderBy: { date: 'asc' },
-  });
-
-  const thisWeek = schedules.filter((s) => s.date <= saturday);
-  const nextWeek = schedules.filter((s) => s.date > saturday);
-
-  let msg = '📅 Jadwal WFO kamu:\n';
+  const rentang = rentangDuaMinggu(today);
+  const schedules = await ambilJadwalDuaMinggu(employeeNik, rentang);
 
   // Jadwal hari ini sudah termuat di hasil query di atas (gte today), jadi cukup disaring.
-  const todaySchedule = schedules.filter((s) => s.date.getTime() === today.getTime());
+  const hariIni = proyekHariIni(schedules, today);
   // Data jadwal didahulukan: ada kalanya proyek menjadwalkan WFO di akhir pekan, dan
   // dulu hari itu tetap tertulis "Day Off" karena harinya diperiksa lebih dulu.
   let todayStatus: string;
-  if (todaySchedule.length > 0) {
-    todayStatus = `🏢 WFO (${todaySchedule.map((s) => s.projectName).join(', ')})`;
+  if (hariIni.length > 0) {
+    todayStatus = `🏢 WFO (${hariIni.join(', ')})`;
   } else if (weekday === 0 || weekday === 6) {
     todayStatus = '🏖️ Day Off';
   } else {
     todayStatus = '🏠 WFH';
   }
-  msg += `\n📍 Hari ini: ${todayStatus}\n`;
 
-  msg += '\n📌 Minggu ini:\n';
-  const thisWeekGrouped = groupSchedulesByDate(thisWeek);
-  if (thisWeekGrouped.length > 0) {
-    for (const g of thisWeekGrouped) {
-      msg += `  • ${formatDateOnly(g.date)} — ${formatProjects(g)}\n`;
-    }
-  } else {
-    msg += '  Belum ada jadwal\n';
-  }
-
-  msg += '\n📌 Minggu depan:\n';
-  const nextWeekGrouped = groupSchedulesByDate(nextWeek);
-  if (nextWeekGrouped.length > 0) {
-    for (const g of nextWeekGrouped) {
-      msg += `  • ${formatDateOnly(g.date)} — ${formatProjects(g)}\n`;
-    }
-  } else {
-    msg += '  Belum ada jadwal\n';
-  }
+  const msg =
+    '📅 Jadwal WFO kamu:\n' + `\n📍 Hari ini: ${todayStatus}\n` + formatDuaMinggu(schedules, rentang);
 
   await reply(ctx, msg);
 }
@@ -199,6 +176,7 @@ bot.command('start', async (ctx) => {
     '/login — hubungkan akun Google\n' +
     '/status — cek status\n' +
     '/schedule — jadwal WFO\n' +
+    '/schedule_of <nama> — jadwal WFO rekan kerja\n' +
     '/holiday — daftar hari libur\n' +
     '/history — riwayat absensi 14 hari\n' +
     '/check_in — absen masuk\n' +
@@ -229,6 +207,146 @@ bot.command('schedule', async (ctx) => {
   const { telegramId, user } = sesi;
 
   await showSchedule(ctx, telegramId, user.googleEmail);
+});
+
+// --- Jadwal Rekan Kerja ---
+
+/**
+ * Menutup pesan bertombol: teksnya diganti supaya tombolnya ikut hilang, dan kalau
+ * penyuntingan ditolak (pesan terlalu tua, sudah dihapus) jawabannya tetap sampai.
+ */
+async function tutupTombol(ctx: Context, teks: string): Promise<void> {
+  try {
+    await ctx.editMessageText(teks);
+  } catch {
+    await reply(ctx, teks);
+  }
+}
+
+const CARA_PAKAI_SCHEDULE_OF =
+  'ℹ️ Sebutkan nama rekan kerja yang mau dilihat jadwalnya.\n\n' +
+  'Contoh: /schedule_of budi\n\n' +
+  `Cukup sebagian nama, minimal ${MIN_HURUF_QUERY} huruf.`;
+
+const TOMBOL_BATAL = { text: '❌ Batal', callback_data: 'sof:batal' };
+
+const tombolOrang = (kandidat: readonly KandidatNama[]) => [
+  ...kandidat.map((k) => [{ text: k.name, callback_data: `sof:nik:${k.employeeNik}` }]),
+  [TOMBOL_BATAL],
+];
+
+async function jadwalOrang(employee: EmployeeRecord): Promise<string> {
+  const today = todayWIB();
+  const rentang = rentangDuaMinggu(today);
+  const schedules = await ambilJadwalDuaMinggu(employee.employeeNik, rentang);
+
+  return formatJadwalOrang(employee, schedules, today, rentang);
+}
+
+bot.command('schedule_of', async (ctx) => {
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+
+  const query = ctx.message.text.replace(/^\/schedule_of(@\S+)?/, '').trim();
+  if (normalisasiNama(query).length < MIN_HURUF_QUERY) {
+    await reply(
+      ctx,
+      query
+        ? `❌ "${query}" terlalu pendek untuk dicari.\n\n${CARA_PAKAI_SCHEDULE_OF}`
+        : CARA_PAKAI_SCHEDULE_OF
+    );
+    return;
+  }
+
+  let direktori: EmployeeRecord[];
+  try {
+    direktori = await fetchActiveEmployees();
+  } catch (err) {
+    console.error('Gagal mengambil direktori karyawan:', errorMessage(err));
+    await reply(ctx, '⚠️ Data karyawan sedang tidak bisa diakses. Coba lagi beberapa saat.');
+    return;
+  }
+
+  // Pairing dibaca apa adanya, tidak dibuat di sini: menautkan akun adalah urusan
+  // /schedule, dan mencari jadwal orang lain tidak boleh punya efek samping.
+  const nikSendiri = (await getUserPairing(sesi.telegramId))?.employeeNik ?? null;
+  const hasil = cariNama(query, direktori.filter((k) => k.employeeNik !== nikSendiri));
+
+  if (menunjukDiriSendiri(query, direktori, nikSendiri, hasil)) {
+    await reply(ctx, '🙂 Itu kamu sendiri.\n\nPakai /schedule untuk melihat jadwalmu.');
+    return;
+  }
+
+  if (hasil.jenis === 'kosong') {
+    await reply(
+      ctx,
+      `❌ Tidak ada karyawan bernama "${query}".\n\nCoba ejaan lain atau sebagian nama yang lain.`
+    );
+    return;
+  }
+
+  if (hasil.jenis === 'saran') {
+    await reply(ctx, `❓ "${query}" tidak ditemukan. Maksud kamu:`, {
+      reply_markup: { inline_keyboard: tombolOrang(hasil.hasil) },
+    });
+    return;
+  }
+
+  if (hasil.hasil.length === 1) {
+    await reply(ctx, await jadwalOrang(hasil.hasil[0]));
+    return;
+  }
+
+  const sisa = hasil.total - hasil.hasil.length;
+  const kepala = `🔍 ${hasil.total} orang cocok dengan "${query}".`;
+  const ekor = sisa > 0 ? `\n\n💡 Masih ada ${sisa} lainnya — ketik namanya lebih lengkap.` : '';
+
+  await reply(ctx, `${kepala} ${sisa > 0 ? `Ini ${MAKS_PILIHAN} teratas:` : 'Pilih salah satu:'}${ekor}`, {
+    reply_markup: { inline_keyboard: tombolOrang(hasil.hasil) },
+  });
+});
+
+/**
+ * Tombol pilihan hasil /schedule_of.
+ *
+ * Yang dibawa hanya NIK; nama, jabatan, dan jadwalnya diambil ulang saat ditekan. Tidak
+ * ada state di memori, jadi restart di antara pesan dan penekanan tombol tidak merusak
+ * apa pun — dan tombol lama tetap sah karena yang tampil selalu data terkini.
+ */
+bot.action(/^sof:nik:([A-Za-z0-9._-]{1,50})$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => undefined);
+
+  const [, nik] = ctx.match;
+
+  const sesi = await requireUser(ctx);
+  if (!sesi) return;
+
+  const nikSendiri = (await getUserPairing(sesi.telegramId))?.employeeNik ?? null;
+  if (nik === nikSendiri) {
+    await tutupTombol(ctx, '🙂 Itu kamu sendiri.\n\nPakai /schedule untuk melihat jadwalmu.');
+    return;
+  }
+
+  let employee: EmployeeRecord | null;
+  try {
+    employee = await findEmployeeByNik(nik);
+  } catch (err) {
+    console.error(`Gagal mengambil data karyawan ${nik}:`, errorMessage(err));
+    await tutupTombol(ctx, '⚠️ Data karyawan sedang tidak bisa diakses. Coba lagi beberapa saat.');
+    return;
+  }
+
+  if (!employee) {
+    await tutupTombol(ctx, '⚠️ Data karyawan itu sudah tidak tersedia.');
+    return;
+  }
+
+  await tutupTombol(ctx, await jadwalOrang(employee));
+});
+
+bot.action('sof:batal', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => undefined);
+  await tutupTombol(ctx, '👍 Pencarian dibatalkan.');
 });
 
 /**
@@ -328,28 +446,20 @@ bot.action(/^ci:(ok|batal):(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
   const [, pilihan, tanggal] = ctx.match;
   const hariIni = isoDateOf(todayWIB());
 
-  const selesai = async (teks: string) => {
-    try {
-      await ctx.editMessageText(teks);
-    } catch {
-      await reply(ctx, teks);
-    }
-  };
-
   if (tanggal !== hariIni) {
-    await selesai('⌛ Tombol ini sudah kedaluwarsa karena harinya sudah berganti. Kirim /check_in lagi.');
+    await tutupTombol(ctx, '⌛ Tombol ini sudah kedaluwarsa karena harinya sudah berganti. Kirim /check_in lagi.');
     return;
   }
 
   if (pilihan === 'batal') {
-    await selesai('👍 Check-in dibatalkan. Selamat berlibur!');
+    await tutupTombol(ctx, '👍 Check-in dibatalkan. Selamat berlibur!');
     return;
   }
 
   const sesi = await requireUser(ctx);
   if (!sesi) return;
 
-  await selesai(await lakukanCheckin(ctx, sesi.telegramId, sesi.user));
+  await tutupTombol(ctx, await lakukanCheckin(ctx, sesi.telegramId, sesi.user));
 });
 
 /** Absensi hari lalu yang belum ditutup — jamnya harus dikoreksi manual, bukan diisi "sekarang". */
@@ -465,16 +575,8 @@ bot.action(/^co:(ok|batal):(\d+)$/, async (ctx) => {
 
   const [, pilihan, idMentah] = ctx.match;
 
-  const selesai = async (teks: string) => {
-    try {
-      await ctx.editMessageText(teks);
-    } catch {
-      await reply(ctx, teks);
-    }
-  };
-
   if (pilihan === 'batal') {
-    await selesai('👍 Check-out dibatalkan.');
+    await tutupTombol(ctx, '👍 Check-out dibatalkan.');
     return;
   }
 
@@ -483,23 +585,23 @@ bot.action(/^co:(ok|batal):(\d+)$/, async (ctx) => {
 
   const absensi = await prisma.attendance.findUnique({ where: { id: Number(idMentah) } });
   if (!absensi || absensi.telegramId !== sesi.telegramId) {
-    await selesai('⚠️ Absensi itu tidak ditemukan.');
+    await tutupTombol(ctx, '⚠️ Absensi itu tidak ditemukan.');
     return;
   }
   if (absensi.checkOut) {
-    await selesai(`❌ Absensi itu sudah ditutup (${formatTimeWIB(absensi.checkOut)}).`);
+    await tutupTombol(ctx, `❌ Absensi itu sudah ditutup (${formatTimeWIB(absensi.checkOut)}).`);
     return;
   }
 
   // Hari sudah berganti sejak tombolnya muncul — jam sekarang bukan lagi jam yang benar.
   if (absensi.date.getTime() !== todayWIB().getTime()) {
-    await selesai('⌛ Harinya sudah berganti. Kirim /check_out lagi untuk memasukkan jam pulangmu.');
+    await tutupTombol(ctx, '⌛ Harinya sudah berganti. Kirim /check_out lagi untuk memasukkan jam pulangmu.');
     return;
   }
 
   const realNow = new Date();
   await tutupAbsensi(absensi.id, realNow);
-  await selesai(await pesanCheckout(sesi.user, absensi.checkIn, realNow));
+  await tutupTombol(ctx, await pesanCheckout(sesi.user, absensi.checkIn, realNow));
 });
 
 /**
@@ -745,6 +847,7 @@ const BOT_COMMANDS = [
   { command: 'logout', description: 'Hapus koneksi akun Google' },
   { command: 'status', description: 'Cek status verifikasi, absensi & cuti hari ini' },
   { command: 'schedule', description: 'Lihat jadwal WFO minggu ini & minggu depan' },
+  { command: 'schedule_of', description: 'Lihat jadwal WFO rekan kerja — /schedule_of nama' },
   { command: 'holiday', description: 'Lihat hari libur 365 hari ke depan' },
   { command: 'history', description: 'Riwayat absensi 14 hari terakhir' },
   { command: 'check_in', description: 'Absen masuk (min. 08:00 WIB)' },
