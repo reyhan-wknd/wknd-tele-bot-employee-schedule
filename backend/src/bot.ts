@@ -640,7 +640,12 @@ bot.on(message('text'), async (ctx, next) => {
   // Barisnya baru diambil di sini: jalur ini tidak lewat requireUser, dan sebelum absensinya
   // benar-benar ditutup belum ada gunanya.
   const user = await prisma.user.findUnique({ where: { telegramId } });
-  await reply(ctx, await pesanCheckout(user, tertinggal.checkIn, checkOut, tertinggal.date));
+  // remove_keyboard melepas force_reply dari pesanMintaJam. Tanpa ini klien Telegram terus
+  // menampilkan bar "Reply to" ke pertanyaan yang sudah terjawab: status "sudah dibalas"
+  // hanya ada di memori klien, jadi bar-nya kembali setiap chat dibuka ulang.
+  await reply(ctx, await pesanCheckout(user, tertinggal.checkIn, checkOut, tertinggal.date), {
+    reply_markup: { remove_keyboard: true },
+  });
 });
 
 bot.command('status', async (ctx) => {

@@ -44,6 +44,8 @@ let terkirim: string[];
 let disunting: string[];
 /** Susunan inline keyboard dari tiap pesan bertombol yang dikirim. */
 let tombolTerkirim: { text: string; callback_data?: string }[][][];
+/** reply_markup tiap sendMessage, sejajar dengan `terkirim` — undefined bila tanpa markup. */
+let markupTerkirim: unknown[];
 
 beforeAll(async () => {
   vi.stubEnv('BOT_TOKEN', '123:token-uji');
@@ -59,6 +61,7 @@ beforeEach(() => {
   terkirim = [];
   disunting = [];
   tombolTerkirim = [];
+  markupTerkirim = [];
   // Disadap di prototipe, bukan di bot.telegram: handleUpdate membuat instance Telegram
   // baru untuk setiap update, jadi menambal instance yang ada tidak akan kena.
   vi.spyOn(Telegram.prototype, 'callApi').mockImplementation((async (
@@ -70,6 +73,7 @@ beforeEach(() => {
   ) => {
     if (metode === 'sendMessage' && payload?.text) {
       terkirim.push(payload.text);
+      markupTerkirim.push(payload.reply_markup);
       if (payload.reply_markup?.inline_keyboard) {
         tombolTerkirim.push(payload.reply_markup.inline_keyboard);
       }
@@ -243,6 +247,22 @@ describe('/check_out untuk absensi yang terlewat', () => {
   test('jam di luar 23:59 ditolak', async () => {
     await balasanKeBot('24:00');
     expect(prismaTiruan.attendance.update).not.toHaveBeenCalled();
+  });
+
+  test('pesan force_reply dilepas setelah jamnya diterima', async () => {
+    // Klien Telegram terus memunculkan bar "Reply to" untuk pesan force_reply terakhir
+    // dari bot — sampai bot sendiri mengirim remove_keyboard. Status "sudah dibalas"
+    // hanya disimpan di memori klien, jadi tanpa ini bar-nya kembali tiap chat dibuka.
+    await balasanKeBot('17:30');
+
+    expect(terkirim.at(-1)).toContain('Check-out berhasil');
+    expect(markupTerkirim.at(-1)).toEqual({ remove_keyboard: true });
+  });
+
+  test('jam yang ditolak tidak melepas force_reply — pertanyaannya belum terjawab', async () => {
+    await balasanKeBot('kemarin sore');
+
+    expect(markupTerkirim.at(-1)).toBeUndefined();
   });
 
   test('reminder yang mengantre ikut dibatalkan setelah ditutup', async () => {
