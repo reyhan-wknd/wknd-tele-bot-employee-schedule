@@ -7,6 +7,11 @@ import { todayWIB, weekdayOf } from '../lib/time';
 
 const bot = createBot(process.env.BOT_TOKEN!);
 
+async function idSudahAbsen(tanggal: Date): Promise<Set<string>> {
+  const absensi = await prisma.attendance.findMany({ where: { date: tanggal }, select: { telegramId: true } });
+  return new Set(absensi.map((a) => a.telegramId.toString()));
+}
+
 export async function sendCheckInReminders() {
   const today = todayWIB();
   const weekday = weekdayOf(today);
@@ -22,21 +27,26 @@ export async function sendCheckInReminders() {
   }
 
   const users = await prisma.user.findMany();
-  const sudahAbsen = new Set(
-    (await prisma.attendance.findMany({ where: { date: today }, select: { telegramId: true } }))
-      .map((a) => a.telegramId.toString())
-  );
 
-  const pesan: PesanMassal[] = [];
+  // Yang sudah absen sejak awal tidak perlu ditanyakan ke Google.
+  const absenAwal = await idSudahAbsen(today);
+  const tidakCuti = [];
   for (const user of users) {
-    if (sudahAbsen.has(user.telegramId.toString())) continue;
+    if (absenAwal.has(user.telegramId.toString())) continue;
     if (await isUserOnLeave(user)) continue;
+    tidakCuti.push(user);
+  }
 
-    pesan.push({
+  // Dibaca ulang karena cek cuti di atas bisa makan waktu, dan orang yang check-in
+  // selama itu tidak boleh ikut ditagih. Pernah terjadi: daftar dibaca 09:05, cek cuti
+  // tertahan sampai 09:11, reminder terkirim ke orang yang sudah check-in 09:09.
+  const sudahAbsen = await idSudahAbsen(today);
+  const pesan: PesanMassal[] = tidakCuti
+    .filter((user) => !sudahAbsen.has(user.telegramId.toString()))
+    .map((user) => ({
       telegramId: user.telegramId,
       text: '⏰ Reminder: Kamu belum check-in hari ini. Gunakan /check_in untuk absen masuk.',
-    });
-  }
+    }));
 
   const hasil = await kirimMassal(bot, pesan);
   console.log(`Reminder check-in: ${users.length} user diperiksa, ${hasil.terkirim} terkirim, ${hasil.diblokir} memblokir bot, ${hasil.gagal} gagal`);

@@ -31,6 +31,47 @@ function createOAuth2Client(accessToken: string, refreshToken: string | null): O
   return client;
 }
 
+/**
+ * Batas tunggu satu pemeriksaan cuti, dari awal sampai jawaban — termasuk refresh token.
+ *
+ * Tanpa batas ini, koneksi ke Google yang menggantung ditunggu sampai timeout OS lalu
+ * diulang dua kali oleh gaxios: 4–7 menit per panggilan. Itu terjadi 14 September 2026,
+ * saat rute ISP ke sebagian IP www.googleapis.com putus. Webhook tidak menjawab, Telegram
+ * mengirim ulang update yang sama tiap menit, dan reminder memakai data absensi yang basi.
+ * Deteksi cuti memang fail-open, jadi lebih baik cepat menyerah daripada menahan bot.
+ */
+export const BATAS_TUNGGU_KALENDER_MS = 5_000;
+
+class KalenderTerlambat extends Error {
+  constructor() {
+    super(`Google Calendar tidak menjawab dalam ${BATAS_TUNGGU_KALENDER_MS} ms`);
+  }
+}
+
+async function denganBatasWaktu<T>(janji: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const habis = new Promise<never>((_, tolak) => {
+    timer = setTimeout(() => tolak(new KalenderTerlambat()), BATAS_TUNGGU_KALENDER_MS);
+  });
+
+  try {
+    return await Promise.race([janji, habis]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Keterangan singkat bila error-nya gangguan jaringan — tak ada jawaban HTTP sama sekali,
+ * hanya kode seperti ETIMEDOUT. Null untuk error yang punya jawaban (401, 403, 5xx).
+ */
+function gangguanJaringan(err: unknown): string | null {
+  if (err instanceof KalenderTerlambat) return err.message;
+
+  const { response, code } = err as { response?: unknown; code?: unknown };
+  return !response && typeof code === 'string' ? code : null;
+}
+
 export interface UserToken {
   telegramId: bigint;
   accessToken: string | null;
@@ -68,15 +109,30 @@ export async function isUserOnLeave(user: UserToken, instant: Date = new Date())
   const { start, end } = wibDayBounds(instant);
 
   try {
-    const res = await calendar.events.list({
-      calendarId: 'primary',
-      timeMin: start.toISOString(),
-      timeMax: end.toISOString(),
-      singleEvents: true,
-    });
+    const res = await denganBatasWaktu(
+      calendar.events.list(
+        {
+          calendarId: 'primary',
+          timeMin: start.toISOString(),
+          timeMax: end.toISOString(),
+          singleEvents: true,
+        },
+        // Batas di atas hanya melepaskan pemanggil. Ini yang menutup soketnya dan menahan
+        // gaxios mengulang di belakang, supaya permintaan yang ditinggal tidak menumpuk.
+        { timeout: BATAS_TUNGGU_KALENDER_MS, retryConfig: { retry: 0, noResponseRetries: 0 } }
+      )
+    );
 
     return (res.data.items ?? []).some(isLeaveEvent);
   } catch (err) {
+    // Gangguan jaringan cukup satu baris: stack gaxios lengkap pernah memenuhi log
+    // puluhan baris per panggilan, tiap menit, sampai error lain tidak terbaca.
+    const jaringan = gangguanJaringan(err);
+    if (jaringan) {
+      console.error(`Deteksi cuti ${telegramId} dilewati, dianggap tidak cuti: ${jaringan}`);
+      return false;
+    }
+
     // Kegagalan konfigurasi (API belum diaktifkan, izin dicabut) dulu ikut diserap jadi
     // "tidak cuti" tanpa jejak yang jelas — fiturnya mati diam-diam. Fail-open tetap
     // dipertahankan supaya check-in tidak terblokir, tetapi sebabnya harus terbaca.

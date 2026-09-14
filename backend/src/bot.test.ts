@@ -367,6 +367,22 @@ describe('/check_in tetap menolak saat cuti', () => {
     expect(prismaTiruan.attendance.create).toHaveBeenCalledOnce();
     expect(terkirim.join('\n')).toContain('Check-in berhasil');
   });
+
+  test('sudah check-in — dijawab dari database tanpa menunggu Google Calendar', async () => {
+    // Telegram mengirim ulang update yang tidak dijawab dalam ±60 detik. Kalau kalender
+    // ditanya lebih dulu, tiap kiriman ulang ikut tertahan selama Google menggantung.
+    prismaTiruan.attendance.findUnique.mockResolvedValue({
+      id: 7,
+      checkIn: new Date('2026-08-17T02:09:00Z'),
+      checkOut: null,
+    });
+
+    await perintah('/check_in');
+
+    expect(isUserOnLeave).not.toHaveBeenCalled();
+    expect(prismaTiruan.attendance.create).not.toHaveBeenCalled();
+    expect(terkirim.join('\n')).toContain('sudah check-in hari ini (09.09)');
+  });
 });
 
 describe('/status ikut melaporkan status cuti', () => {

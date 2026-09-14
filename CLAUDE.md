@@ -155,7 +155,7 @@ may not render `rich_message`.
 | `backend/src/scripts/seed-holidays.ts` | Seeds holidays from Google's public Indonesian holiday ICS |
 | `backend/src/lib/time.ts` | Every WIB time calculation; host-timezone independent |
 | `backend/src/lib/crypto.ts` | AES-256-GCM encryption of OAuth tokens at rest |
-| `backend/src/services/calendar.ts` | Leave detection — an event counts as leave only when `eventType === 'outOfOffice'`; titles are never inspected |
+| `backend/src/services/calendar.ts` | Leave detection — an event counts as leave only when `eventType === 'outOfOffice'`; titles are never inspected. Each check is capped at 5 s with no retries and fails open: an unbounded call once hung 4–7 min on a dead ISP route, and Telegram re-delivered the stalled webhook update every minute |
 | `backend/src/services/schedule.ts` | Employee lookup by email and user↔employee pairing |
 | `backend/src/services/supabase.ts` | Fetches WFO schedule data from Supabase REST API |
 | `backend/src/cron/*.ts` | Job bodies; invoked by `scheduler.ts` in-process, and runnable standalone via `tsx` |

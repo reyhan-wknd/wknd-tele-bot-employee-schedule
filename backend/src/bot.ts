@@ -360,15 +360,17 @@ async function lakukanCheckin(
 ): Promise<string> {
   const today = todayWIB();
 
-  if (await isUserOnLeave({ telegramId, ...user })) {
-    return '❌ Kamu sedang cuti hari ini. Tidak perlu check-in.';
-  }
-
+  // Database dulu, baru Google. Telegram mengirim ulang update yang lambat dijawab, dan
+  // kiriman ulang itu mestinya langsung selesai di sini — bukan ikut menunggu kalender.
   const existing = await prisma.attendance.findUnique({
     where: { telegramId_date: { telegramId, date: today } },
   });
   if (existing) {
     return `❌ Kamu sudah check-in hari ini (${formatTimeWIB(existing.checkIn)}).`;
+  }
+
+  if (await isUserOnLeave({ telegramId, ...user })) {
+    return '❌ Kamu sedang cuti hari ini. Tidak perlu check-in.';
   }
 
   const realNow = new Date();
