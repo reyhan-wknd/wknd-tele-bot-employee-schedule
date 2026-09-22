@@ -47,7 +47,7 @@ describe('kirimMassal', () => {
       if (id === 3) throw new Error('jaringan putus');
     });
 
-    await expect(kirimMassal(bot, pesan)).resolves.toEqual({ terkirim: 1, diblokir: 1, gagal: 1 });
+    await expect(kirimMassal(bot, pesan)).resolves.toEqual({ terkirim: 1, diblokir: 1, gagal: 1, terkirimKe: [1n] });
     expect(dikirim).toEqual([1, 2, 3]); // satu penerima gagal tidak menghentikan sisanya
   });
 
@@ -58,14 +58,14 @@ describe('kirimMassal', () => {
       if (percobaan === 1) throw errorTelegram(429, 0);
     });
 
-    await expect(kirimMassal(bot, [pesan[0]])).resolves.toEqual({ terkirim: 1, diblokir: 0, gagal: 0 });
+    await expect(kirimMassal(bot, [pesan[0]])).resolves.toEqual({ terkirim: 1, diblokir: 0, gagal: 0, terkirimKe: [1n] });
     expect(percobaan).toBe(2);
   });
 
   test('daftar kosong tidak memanggil Telegram sama sekali', async () => {
     const { bot, dikirim } = botPalsu(async () => {});
 
-    await expect(kirimMassal(bot, [])).resolves.toEqual({ terkirim: 0, diblokir: 0, gagal: 0 });
+    await expect(kirimMassal(bot, [])).resolves.toEqual({ terkirim: 0, diblokir: 0, gagal: 0, terkirimKe: [] });
     expect(dikirim).toEqual([]);
   });
 });

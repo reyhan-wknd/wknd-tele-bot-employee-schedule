@@ -74,7 +74,7 @@ menanyakan jam pulang yang sebenarnya, dan user membalas dengan `HH:MM`.
 - Auto-pairing user dengan data employee lewat email terverifikasi Google
 - Data di-sync dari Supabase setiap hari jam 20:00 WIB
 - Reminder WFO besok (Senin-Kamis jam 21:00)
-- Reminder jadwal minggu depan (Jumat jam 21:00)
+- Kabar jadwal minggu depan (Jumat–Minggu jam 21:00; Sabtu/Minggu hanya bila baru terbit atau berubah)
 
 ### Token Management
 - Access & refresh token disimpan terenkripsi (AES-256-GCM) di database
@@ -230,7 +230,7 @@ npx tsx src/cron/reminder-wfo.ts weekly
 | 09:50 | Senin-Jumat | Reminder check-in (3) |
 | 20:00 | Setiap hari | Sync jadwal dari Supabase |
 | 21:00 | Senin-Kamis | Reminder WFO besok |
-| 21:00 | Jumat | Reminder jadwal WFO minggu depan |
+| 21:00 | Jumat-Minggu | Kabar jadwal WFO minggu depan (sync dulu; Sabtu/Minggu hanya bila baru terbit atau berubah) |
 | tiap menit | Setiap hari | Worker antrean job (reminder check-out) |
 
 Reminder check-out **tidak ada di tabel ini** — ia dijadwalkan per orang saat check-in,

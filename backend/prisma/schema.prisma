@@ -101,3 +101,28 @@ model Holiday {
   @@index([month, day])
   @@map("holidays")
 }
+
+/// Apa yang terakhir dikabarkan ke tiap user tentang jadwal WFO satu pekan.
+///
+/// Pengecekan jadwal pekan depan berjalan Jumat, Sabtu, dan Minggu; dua yang terakhir
+/// hanya bersuara bila isinya berbeda dari yang sudah dikirim. Tabel `schedules` tidak
+/// bisa menjadi pembanding karena sync menimpanya, dan memori proses hilang tiap deploy.
+///
+/// `status`: `belum-terbit` (sudah dikabari roster belum ada), `tidak-terbit` (sampai
+/// Minggu tetap tidak ada, sudah dikabari tidak ada WFO), atau `terkirim` (jadwal pada
+/// `snapshot` sudah dikirim — `[]` berarti ia dikabari tidak dapat WFO).
+model WeeklyScheduleNotice {
+  id         Int      @id @default(autoincrement())
+  telegramId BigInt   @map("telegram_id")
+  /// Senin pekan yang dikabarkan.
+  weekStart  DateTime @map("week_start") @db.Date
+  status     String   @map("status") @db.VarChar(20)
+  /// JSON `[{ tanggal, projects }]`, terurut — bentuk baku agar bisa dibandingkan persis.
+  snapshot   String   @map("snapshot") @db.Text
+  /// Tanggal WIB kabar terakhir, supaya pengecekan yang dijalankan ulang hari itu tidak dobel.
+  notifiedOn DateTime @map("notified_on") @db.Date
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([telegramId, weekStart])
+  @@map("weekly_schedule_notices")
+}

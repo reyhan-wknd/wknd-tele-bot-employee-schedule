@@ -38,7 +38,7 @@ docker compose up -d   # MySQL on port 3309, DB: tele_sso, user: root/password
 > production container do.
 
 Cron jobs are **not** installed into the system crontab. They run in-process via
-`node-cron` in `backend/src/scheduler.ts` (9 jobs, all pinned to `timezone: 'Asia/Jakarta'`).
+`node-cron` in `backend/src/scheduler.ts` (8 jobs, all pinned to `timezone: 'Asia/Jakarta'`).
 Each one can still be invoked manually:
 
 ```bash
@@ -59,6 +59,30 @@ npx tsx src/cron/reminder-wfo.ts weekly
 2. **OAuth login flow**: Mini App (`frontend/index.html`) → `POST /auth/init` (validates Telegram `initData` via HMAC-SHA256, issues JWT state token) → Google OAuth → `GET /auth/google/callback` (exchanges code, verifies the ID token, enforces the email-domain gate, upserts user, sends Telegram confirmation, triggers schedule pairing).
 
 3. **Schedule pairing**: identity comes entirely from the Google-verified email. `pairUserByEmail` (`services/schedule.ts`) looks for an employee whose email matches exactly and stores that NIK in `user_schedules`. There is no user-facing NIK entry or confirmation step — the user can never influence which employee record they are bound to. If no employee matches, the user is told to contact an admin and `/schedule` retries the pairing later.
+
+### Kabar jadwal minggu depan
+
+The upstream roster has no fixed publish time — it has appeared Friday afternoon, Friday
+21:03, Saturday 11:39/20:11 and Sunday 17:56 — and a change is a wholesale republish, not
+an edit. So next week's schedule is checked **Friday, Saturday and Sunday at 21:00**
+(`cekJadwalMingguDepan`), with every decision in the pure `lib/jadwal-mingguan.ts`:
+
+- **"Not published" is global, not per person**: zero rows for next Mon–Fri, for anyone.
+  Someone with no rows in a published roster simply has no WFO, and is told so at once.
+  Not published → told "belum terbit" Fri/Sat; on Sunday that becomes the final
+  "tidak ada WFO".
+- Once published, the first notice is the full schedule; later checks speak **only when
+  it differs** from what was sent, as the full new schedule marked 🆕 / ✏️ plus a list
+  of dates no longer WFO. Sunday is final — nothing is re-checked Monday onwards.
+- What was sent lives in `weekly_schedule_notices`, one row per person per week, written
+  **only for messages that were delivered** (`kirimMassal` returns `terkirimKe`), so a
+  failed Friday send yields a full schedule Saturday rather than silence.
+- The decision reads **Supabase directly**, not the local `schedules` table: a successful
+  empty fetch means "not published", a failed fetch means "unknown" and skips the run.
+  The local table cannot tell those apart, and guessing on Sunday would tell people there
+  is no WFO. `syncSchedules()` still runs first so `/schedule` shows the same thing.
+- A roster that vanishes after being sent is treated as an upstream glitch: no message,
+  a warning in the log.
 
 ### Hari Libur
 
@@ -158,8 +182,10 @@ may not render `rich_message`.
 | `backend/src/services/calendar.ts` | Leave detection — an event counts as leave only when `eventType === 'outOfOffice'`; titles are never inspected. Each check is capped at 5 s with no retries and fails open: an unbounded call once hung 4–7 min on a dead ISP route, and Telegram re-delivered the stalled webhook update every minute |
 | `backend/src/services/schedule.ts` | Employee lookup by email and user↔employee pairing |
 | `backend/src/services/supabase.ts` | Fetches WFO schedule data from Supabase REST API |
+| `backend/src/lib/jadwal-mingguan.ts` | Pure decision table for the Fri/Sat/Sun next-week schedule notices and their messages |
+| `backend/src/services/kabar-mingguan.ts` | Reads/writes `weekly_schedule_notices`, what each person was last told about a week |
 | `backend/src/cron/*.ts` | Job bodies; invoked by `scheduler.ts` in-process, and runnable standalone via `tsx` |
-| `backend/prisma/schema.prisma` | DB schema: User, Attendance, Schedule, UserSchedule models |
+| `backend/prisma/schema.prisma` | DB schema: User, Attendance, Schedule, UserSchedule, ScheduledJob, Holiday, WeeklyScheduleNotice models |
 | `frontend/index.html` | Telegram Mini App — initiates OAuth; calls `/auth/init` with `initData` |
 | `frontend/success.html` | Post-login redirect page that auto-closes the Mini App |
 

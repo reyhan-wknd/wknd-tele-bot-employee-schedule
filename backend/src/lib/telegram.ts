@@ -69,6 +69,8 @@ export interface HasilKirim {
   terkirim: number;
   diblokir: number;
   gagal: number;
+  /** Penerima yang pesannya benar-benar sampai, untuk pemanggil yang mencatat siapa sudah dikabari. */
+  terkirimKe: bigint[];
 }
 
 const tidur = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -91,7 +93,7 @@ export function retryAfter(err: unknown): number | null {
  * ringkasan hasil supaya eksekusi cron meninggalkan jejak yang bisa diaudit.
  */
 export async function kirimMassal(bot: Telegraf, pesan: readonly PesanMassal[]): Promise<HasilKirim> {
-  const hasil: HasilKirim = { terkirim: 0, diblokir: 0, gagal: 0 };
+  const hasil: HasilKirim = { terkirim: 0, diblokir: 0, gagal: 0, terkirimKe: [] };
 
   for (const [index, p] of pesan.entries()) {
     if (index > 0) await tidur(JEDA_KIRIM_MS);
@@ -99,6 +101,7 @@ export async function kirimMassal(bot: Telegraf, pesan: readonly PesanMassal[]):
     try {
       await bot.telegram.sendMessage(Number(p.telegramId), p.text);
       hasil.terkirim++;
+      hasil.terkirimKe.push(p.telegramId);
     } catch (err) {
       const tunggu = retryAfter(err);
       if (tunggu !== null) {
@@ -106,6 +109,7 @@ export async function kirimMassal(bot: Telegraf, pesan: readonly PesanMassal[]):
         try {
           await bot.telegram.sendMessage(Number(p.telegramId), p.text);
           hasil.terkirim++;
+          hasil.terkirimKe.push(p.telegramId);
           continue;
         } catch (err2) {
           err = err2;
