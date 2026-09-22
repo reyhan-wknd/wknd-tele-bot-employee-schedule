@@ -25,9 +25,14 @@ export interface ScheduleRecord {
   date: string; // YYYY-MM-DD
 }
 
-function getDateRange(): { start: string; end: string } {
-  // Minggu di pekan berjalan sampai Sabtu pekan depan, dihitung dalam WIB
-  const today = todayWIB();
+/** Rentang tanggal inklusif, YYYY-MM-DD. */
+export interface RentangTanggal {
+  start: string;
+  end: string;
+}
+
+/** Rentang yang disalin sync: Minggu di pekan berjalan sampai Sabtu pekan depan, dalam WIB. */
+export function rentangSync(today: Date = todayWIB()): RentangTanggal {
   const sunday = addDays(today, -weekdayOf(today));
   const nextSaturday = addDays(sunday, 13);
 
@@ -172,9 +177,8 @@ export async function fetchActiveEmployees(): Promise<EmployeeRecord[]> {
   }
 }
 
-export async function fetchAllSchedules(): Promise<ScheduleRecord[]> {
-  const { start, end } = getDateRange();
-  const rows = await fetchSchedulePages(start, end);
+export async function fetchSchedules(rentang: RentangTanggal): Promise<ScheduleRecord[]> {
+  const rows = await fetchSchedulePages(rentang.start, rentang.end);
 
   return rows.map((row) => ({
     employeeNik: row.employee_nik,

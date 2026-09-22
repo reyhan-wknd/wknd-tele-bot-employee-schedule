@@ -138,7 +138,7 @@ may not render `rich_message`.
 ### Data Sources
 
 - **MySQL** (via Prisma): users, attendances, schedules, user_schedules — local operational data
-- **Supabase**: source of truth for WFO schedule data; synced nightly (20:00 WIB) via `cron/sync-schedules.ts` into the local `schedules` table. The Supabase API is accessed with the anon key via raw `fetch()` (not the Supabase client SDK). `lib/sync-guard.ts` aborts the sync if the fetched set is empty or collapses, so a bad upstream response cannot wipe the local table.
+- **Supabase**: source of truth for WFO schedule data; synced nightly (20:00 WIB) via `cron/sync-schedules.ts` into the local `schedules` table. The Supabase API is accessed with the anon key via raw `fetch()` (not the Supabase client SDK). `lib/sync-guard.ts` aborts the sync if the fetched set is empty, or if a week that has rows locally comes back with none, so a bad upstream response cannot wipe the local table. It compares only dates inside the new fetch window and ignores row counts within a week: every Sunday the window shifts and last week drops out, and the roster is republished wholesale — on 2026-09-20 a 206-row week was replaced by 150 entirely different rows, which the old "fell below half" rule rejected for days.
 
 ### Key Files
 

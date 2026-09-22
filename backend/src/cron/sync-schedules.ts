@@ -1,20 +1,26 @@
 import 'dotenv/config';
 import { prisma } from '../db';
-import { fetchAllSchedules } from '../services/supabase';
+import { fetchSchedules, rentangSync } from '../services/supabase';
+import { isoDateOf } from '../lib/time';
 import { assertSyncSane } from '../lib/sync-guard';
 
 export async function syncSchedules() {
   console.log(`[${new Date().toISOString()}] Starting schedule sync...`);
 
   try {
-    const records = await fetchAllSchedules();
-    const existing = await prisma.schedule.count();
+    const rentang = rentangSync();
+    const records = await fetchSchedules(rentang);
+    const existing = await prisma.schedule.findMany({ select: { date: true } });
     console.log(
-      `[${new Date().toISOString()}] Fetched ${records.length} records from Supabase (database: ${existing})`
+      `[${new Date().toISOString()}] Fetched ${records.length} records from Supabase (database: ${existing.length})`
     );
 
     // Sync mengganti seluruh isi tabel, jadi hasil fetch diperiksa kewajarannya dulu.
-    assertSyncSane(records.length, existing);
+    assertSyncSane(
+      records.map((r) => r.date),
+      existing.map((s) => isoDateOf(s.date)),
+      rentang
+    );
 
     await prisma.$transaction([
       prisma.schedule.deleteMany(),
